@@ -17,21 +17,22 @@ struct TabBarView: View {
             tabItem("doc.text", label: "Templates", tab: .templates)
             tabItem("line.3.horizontal", label: "More", tab: .more)
         }
-        .padding(.top, 12)
-        .padding(.bottom, 28)
+        .padding(.top, 5)
+        .padding(.bottom, 12)
         .background(Color.black)
     }
 
     func tabItem(_ icon: String, label: String, tab: Tab) -> some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 2) {
             Image(systemName: icon)
-                .font(.system(size: 20))
+                .font(.system(size: 16))
                 .foregroundColor(selectedTab == tab ? .white : .gray)
             Text(label)
-                .font(.caption)
+                .font(.system(size: 10, weight: .medium))
                 .foregroundColor(selectedTab == tab ? .white : .gray)
         }
         .frame(maxWidth: .infinity)
+        .frame(height: 44)
         .onTapGesture {
             selectedTab = tab
         }
