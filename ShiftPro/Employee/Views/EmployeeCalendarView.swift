@@ -57,11 +57,6 @@ struct EmployeeCalendarView: View {
             // Toast 通知
             ToastView(message: toastMessage, type: toastType, isShowing: $isToastShowing)
                 .zIndex(3)
-
-            // 統一的日期選擇器
-            if isDatePickerPresented {
-                datePickerOverlay()
-            }
         }
         .sheet(isPresented: $isBottomSheetPresented) {
             BottomSheetView(
@@ -70,6 +65,14 @@ struct EmployeeCalendarView: View {
             )
             .presentationDetents([.medium])
             .presentationDragIndicator(.hidden)
+        }
+        .sheet(isPresented: $isDatePickerPresented) {
+            EnhancedDatePickerSheet(
+                selectedYear: $selectedYear,
+                selectedMonth: $selectedMonth,
+                isPresented: $isDatePickerPresented,
+                controller: controller
+            )
         }
         .onChange(of: selectedAction) { _, action in
             if let action = action {
@@ -211,13 +214,13 @@ struct EmployeeCalendarView: View {
         HStack(spacing: 1) { // 使用與格子相同的間距
             ForEach(0..<7, id: \.self) { i in
                 Text(DateFormatter().shortWeekdaySymbols[i].prefix(1))
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.system(size: 14, weight: .medium))  // 調小字體：從 16 改為 14
                     .foregroundColor(.white.opacity(0.8))
-                    .frame(maxWidth: .infinity) // 確保完全對齊
+                    .frame(maxWidth: .infinity, alignment: .center) // 明確設定居中對齊
                     .textCase(.uppercase)
             }
         }
-        .padding(.horizontal, 0) // 移除 padding 確保對齊
+        .padding(.horizontal, 8) // 與月曆格子的 padding 保持一致
         .padding(.bottom, 12)
     }
 
@@ -320,7 +323,7 @@ struct EmployeeCalendarView: View {
 
             VStack(spacing: 0) {
                 Text("\(day)")
-                    .font(.system(size: min(cellHeight / 5, 16), weight: .medium))
+                    .font(.system(size: min(cellHeight / 5, 14), weight: .medium))  // 調小字體：從 16 改為 14
                     .foregroundColor(isVacationSelected ? .white : .white)
                     .padding(.top, 8)
 
@@ -328,7 +331,7 @@ struct EmployeeCalendarView: View {
 
                 if isVacationSelected {
                     Text("休")
-                        .font(.system(size: min(cellHeight / 8, 9), weight: .bold))
+                        .font(.system(size: min(cellHeight / 8, 8), weight: .bold))  // 調小字體：從 9 改為 8
                         .foregroundColor(.white)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
@@ -416,7 +419,7 @@ struct EmployeeCalendarView: View {
         }
     }
 
-    // MARK: - 優化後的月份標題視圖 (統一的日期選擇器觸發)
+    // MARK: - 優化後的月份標題視圖 (縮小月份字體)
     private func monthTitleView(month: CalendarMonth) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -429,16 +432,19 @@ struct EmployeeCalendarView: View {
                     }
                 }) {
                     HStack(spacing: 8) {
+                        // 縮小月份字體以避免長英文單字被壓縮
                         Text(month.monthName)
-                            .font(.system(size: 36, weight: .bold))
+                            .font(.system(size: 28, weight: .bold))  // 從 36 改為 28
                             .foregroundColor(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)  // 允許縮放到 70%
 
-                        Text("\(month.year)年")
-                            .font(.system(size: 20, weight: .medium))
+                        Text("\(String(month.year))年")
+                            .font(.system(size: 18, weight: .medium))  // 從 20 改為 18
                             .foregroundColor(.white.opacity(0.9))
 
                         Image(systemName: "chevron.down")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(.system(size: 14, weight: .medium))  // 從 16 改為 14
                             .foregroundColor(.white.opacity(0.7))
                     }
                 }
@@ -484,128 +490,18 @@ struct EmployeeCalendarView: View {
         .padding(.vertical, 20)
     }
 
-    // MARK: - 優化的統一日期選擇器
-    private func datePickerOverlay() -> some View {
-        ZStack {
-            // 半透明黑色背景
-            Color.black.opacity(0.4)
-                .ignoresSafeArea()
-                .onTapGesture {
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        isDatePickerPresented = false
-                    }
-                }
-
-            VStack {
-                Spacer()
-
-                VStack(spacing: 0) {
-                    // 頂部控制條
-                    HStack {
-                        Button("取消") {
-                            withAnimation(.easeInOut(duration: 0.3)) {
-                                isDatePickerPresented = false
-                            }
-                        }
-                        .foregroundColor(.blue)
-                        .font(.system(size: 17))
-
-                        Spacer()
-
-                        Text("選擇日期")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundColor(.primary)
-
-                        Spacer()
-
-                        Button("完成") {
-                            withAnimation(.easeInOut(duration: 0.3)) {
-                                isDatePickerPresented = false
-                            }
-                        }
-                        .foregroundColor(.blue)
-                        .font(.system(size: 17, weight: .semibold))
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 16)
-                    .background(Color(.systemGray6))
-
-                    // 分隔線
-                    Rectangle()
-                        .fill(Color(.systemGray4))
-                        .frame(height: 0.5)
-
-                    // 統一的年月選擇器
-                    HStack(spacing: 0) {
-                        // 年份選擇器
-                        VStack(spacing: 8) {
-                            Text("年份")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(.secondary)
-                                .padding(.top, 12)
-
-                            Picker("年份", selection: $selectedYear) {
-                                ForEach(2020...2030, id: \.self) { year in
-                                    Text("\(year)")
-                                        .font(.system(size: 20, weight: .medium))
-                                        .tag(year)
-                                }
-                            }
-                            .pickerStyle(WheelPickerStyle())
-                            .frame(height: 180)
-                        }
-                        .frame(maxWidth: .infinity)
-
-                        // 中間分隔線
-                        Rectangle()
-                            .fill(Color(.systemGray5))
-                            .frame(width: 1)
-                            .padding(.vertical, 20)
-
-                        // 月份選擇器
-                        VStack(spacing: 8) {
-                            Text("月份")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(.secondary)
-                                .padding(.top, 12)
-
-                            Picker("月份", selection: $selectedMonth) {
-                                ForEach(1...12, id: \.self) { month in
-                                    Text("\(month)月")
-                                        .font(.system(size: 20, weight: .medium))
-                                        .tag(month)
-                                }
-                            }
-                            .pickerStyle(WheelPickerStyle())
-                            .frame(height: 180)
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                    .background(Color(.systemBackground))
-                    .padding(.bottom, 12)
-                }
-                .background(Color(.systemBackground))
-                .cornerRadius(16)
-                .shadow(color: .black.opacity(0.1), radius: 20, x: 0, y: 10)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 40)
-            }
-        }
-        .transition(.opacity.combined(with: .move(edge: .bottom)))
-        .zIndex(10)
-    }
-
+    // MARK: - 統一星期標題與日期的字體大小
     private func weekdayHeadersView() -> some View {
         HStack(spacing: 1) { // 使用與格子相同的間距
             ForEach(0..<7, id: \.self) { i in
                 Text(DateFormatter().shortWeekdaySymbols[i].prefix(1))
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.system(size: 14, weight: .medium))  // 調小字體：從 16 改為 14
                     .foregroundColor(.white.opacity(0.8))
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, alignment: .center)  // 明確設定居中對齊
                     .textCase(.uppercase)
             }
         }
-        .padding(.horizontal, 0) // 移除 padding 確保對齊
+        .padding(.horizontal, 8) // 與月曆格子的 padding 保持一致
         .padding(.bottom, 12)
     }
 
@@ -623,9 +519,10 @@ struct EmployeeCalendarView: View {
         .drawingGroup() // 減少重繪，提升滑動性能
     }
 
+    // MARK: - 改進的日期格子（支援灰色日期選擇）
     private func normalModeCalendarCell(date: CalendarDate, month: CalendarMonth, cellHeight: CGFloat) -> some View {
         let dateString = dateToString(date)
-        let isSelected = controller.isDateSelected(date) && date.isCurrentMonth == true
+        let isSelected = controller.isDateSelected(date)  // 移除 && date.isCurrentMonth == true
         let isVacationSelected = vacationData.isDateSelected(dateString) && date.isCurrentMonth == true
 
         return ZStack {
@@ -633,6 +530,7 @@ struct EmployeeCalendarView: View {
                 .fill(Color.gray.opacity(0.05))
                 .frame(height: cellHeight)
 
+            // 選中狀態背景 - 支援灰色日期
             if isSelected && !isVacationEditMode {
                 Rectangle()
                     .fill(Color.white)
@@ -656,7 +554,7 @@ struct EmployeeCalendarView: View {
 
             VStack(spacing: 0) {
                 Text("\(date.day)")
-                    .font(.system(size: min(cellHeight / 5, 16), weight: .medium)) // 縮小字體
+                    .font(.system(size: min(cellHeight / 5, 14), weight: .medium))  // 調小字體：從 16 改為 14
                     .foregroundColor(textColor(for: date, isSelected: isSelected, isVacationSelected: isVacationSelected))
                     .padding(.top, 8)
 
@@ -664,7 +562,7 @@ struct EmployeeCalendarView: View {
 
                 if isVacationSelected {
                     Text("休")
-                        .font(.system(size: min(cellHeight / 8, 9), weight: .bold)) // 縮小標籤
+                        .font(.system(size: min(cellHeight / 8, 8), weight: .bold))  // 調小字體：從 9 改為 8
                         .foregroundColor(.white)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
@@ -678,11 +576,8 @@ struct EmployeeCalendarView: View {
             }
         }
         .onTapGesture {
-            if date.isCurrentMonth == true {
-                controller.selectDate(date)
-            } else {
-                controller.selectDate(date)
-            }
+            // 支援所有日期的選擇，包括灰色日期
+            controller.selectDate(date)
         }
     }
 
@@ -775,6 +670,7 @@ struct EmployeeCalendarView: View {
         }
     }
 
+    // MARK: - 優化的編輯按鈕（白色背景，padding 15）
     private func editButtonOverlay() -> some View {
         VStack {
             Spacer()
@@ -824,18 +720,17 @@ struct EmployeeCalendarView: View {
                         }
                     }
                 } else {
+                    // 白色背景的筆按鈕，padding 15
                     Button(action: {
                         isBottomSheetPresented = true
                     }) {
                         Image(systemName: "pencil")
-                            .font(.system(size: 22, weight: .bold))
+                            .font(.system(size: 20, weight: .bold))  // 稍微調小字體
                             .foregroundColor(.black)
-                            .padding(20)
-                            .background(
-                                Circle()
-                                    .fill(.ultraThinMaterial)
-                                    .shadow(color: .black.opacity(0.25), radius: 15, x: 0, y: 8)
-                            )
+                            .padding(15)  // 設定為 15
+                            .background(Color.white)  // 白色背景
+                            .clipShape(Circle())
+                            .shadow(color: .black.opacity(0.15), radius: 8, x: 0, y: 4)  // 調整陰影
                     }
                 }
             }
@@ -892,6 +787,203 @@ struct EmployeeCalendarView: View {
         }
     }
 }
+
+// MARK: - 美化的原生 Sheet 日期選擇器
+struct EnhancedDatePickerSheet: View {
+    @Binding var selectedYear: Int
+    @Binding var selectedMonth: Int
+    @Binding var isPresented: Bool
+
+    // 傳入 controller 來實現月份跳轉
+    let controller: CalendarController
+
+    var body: some View {
+        NavigationView {
+            ZStack {
+                // 漸層背景
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color(.systemBackground),
+                        Color(.systemGray6).opacity(0.3)
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+
+                VStack(spacing: 0) {
+                    // 主要選擇器區域
+                    VStack(spacing: 0) {
+                        // 雙 Picker 容器
+                        HStack(spacing: 0) {
+                            // 年份選擇器
+                            VStack(spacing: 12) {
+                                HStack {
+                                    Image(systemName: "calendar")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.blue)
+
+                                    Text("年份")
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundColor(.primary)
+                                }
+                                .padding(.top, 16)
+
+                                Picker("年份", selection: $selectedYear) {
+                                    ForEach(1900...2100, id: \.self) { year in
+                                        Text(String(year))
+                                            .font(.system(size: 22, weight: .medium))
+                                            .tag(year)
+                                    }
+                                }
+                                .pickerStyle(WheelPickerStyle())
+                                .frame(height: 200)
+                                .clipped()
+                            }
+                            .frame(maxWidth: .infinity)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color(.systemBackground))
+                                    .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
+                            )
+                            .padding(.leading, 20)
+                            .padding(.trailing, 8)
+
+                            // 月份選擇器
+                            VStack(spacing: 12) {
+                                HStack {
+                                    Image(systemName: "calendar.circle")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.green)
+
+                                    Text("月份")
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundColor(.primary)
+                                }
+                                .padding(.top, 16)
+
+                                Picker("月份", selection: $selectedMonth) {
+                                    ForEach(1...12, id: \.self) { month in
+                                        Text("\(month)月")
+                                            .font(.system(size: 22, weight: .medium))
+                                            .tag(month)
+                                    }
+                                }
+                                .pickerStyle(WheelPickerStyle())
+                                .frame(height: 200)
+                                .clipped()
+                            }
+                            .frame(maxWidth: .infinity)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color(.systemBackground))
+                                    .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
+                            )
+                            .padding(.trailing, 20)
+                            .padding(.leading, 8)
+                        }
+                        .padding(.bottom, 20)
+                    }
+
+                    // 快速選擇按鈕
+                    VStack(spacing: 12) {
+                        Text("快速選擇")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.secondary)
+
+                        HStack(spacing: 12) {
+                            quickSelectButton(title: "本月", action: {
+                                let now = Date()
+                                selectedYear = Calendar.current.component(.year, from: now)
+                                selectedMonth = Calendar.current.component(.month, from: now)
+                            })
+
+                            quickSelectButton(title: "下月", action: {
+                                let calendar = Calendar.current
+                                let nextMonth = calendar.date(byAdding: .month, value: 1, to: Date()) ?? Date()
+                                selectedYear = calendar.component(.year, from: nextMonth)
+                                selectedMonth = calendar.component(.month, from: nextMonth)
+                            })
+
+                            quickSelectButton(title: "上月", action: {
+                                let calendar = Calendar.current
+                                let lastMonth = calendar.date(byAdding: .month, value: -1, to: Date()) ?? Date()
+                                selectedYear = calendar.component(.year, from: lastMonth)
+                                selectedMonth = calendar.component(.month, from: lastMonth)
+                            })
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 30)
+
+                    Spacer()
+                }
+            }
+            .navigationTitle("選擇日期")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarBackButtonHidden()
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            isPresented = false
+                        }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 16))
+                            Text("取消")
+                                .font(.system(size: 16))
+                        }
+                        .foregroundColor(.secondary)
+                    }
+                }
+
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: {
+                        // 跳轉到選中的年月
+                        controller.navigateToMonth(year: selectedYear, month: selectedMonth)
+
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            isPresented = false
+                        }
+                    }) {
+                        HStack(spacing: 6) {
+                            Text("前往")
+                                .font(.system(size: 16, weight: .semibold))
+                            Image(systemName: "arrow.right.circle.fill")
+                                .font(.system(size: 16))
+                        }
+                        .foregroundColor(.blue)
+                    }
+                }
+            }
+        }
+        .presentationDetents([.fraction(0.55)])
+        .presentationDragIndicator(.visible)
+    }
+
+    // MARK: - 快速選擇按鈕
+    private func quickSelectButton(title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.blue)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(Color.blue.opacity(0.1))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 20)
+                                .stroke(Color.blue.opacity(0.3), lineWidth: 1)
+                        )
+                )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
 
 #Preview {
     EmployeeCalendarView()

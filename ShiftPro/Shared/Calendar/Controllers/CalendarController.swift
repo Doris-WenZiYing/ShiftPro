@@ -67,3 +67,11 @@ public class CalendarController: ObservableObject {
         return selected == date
     }
 }
+
+extension CalendarController {
+    func navigateToMonth(year: Int, month: Int) {
+        self.setYearMonth(year: year, month: month)
+
+        print("Navigate to: \(year)年\(month)月")
+    }
+}
