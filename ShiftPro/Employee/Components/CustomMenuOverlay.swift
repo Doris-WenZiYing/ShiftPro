@@ -201,10 +201,8 @@ struct CustomMenuOverlay: View {
         }
         .onChange(of: isPresented) { oldValue, newValue in
             if newValue && !oldValue {
-                withAnimation(.linear(duration: 0.25)) {
-                    dragOffset = 0
-                    isDragging = false
-                }
+                dragOffset = 0
+                isDragging = false
             }
         }
     }
@@ -255,10 +253,8 @@ struct CustomMenuOverlay: View {
     }
 
     private func closeMenu() {
-        withAnimation(.linear(duration: 0.2)) {
-            isPresented = false
-            dragOffset = 0
-        }
+        isPresented = false
+        dragOffset = 0
     }
 
     private func snapBackToOpen() {

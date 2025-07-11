@@ -19,6 +19,7 @@ class EmployeeCalendarViewModel: ObservableObject {
     @Published var toastMessage = ""
     @Published var toastType: ToastType = .info
     @Published var isToastShowing = false
+    @Published var isUsingBossSettings: Bool = false
 
     // MARK: - Private Properties
     private var cancellables = Set<AnyCancellable>()
@@ -35,7 +36,13 @@ class EmployeeCalendarViewModel: ObservableObject {
 
     // MARK: - Initialization
     init() {
+        setupVacationLimitsListener()
+        loadVacationLimitsFromBossSettings()
         loadVacationData()
+    }
+
+    deinit {
+        removeVacationLimitsListener()
     }
 
     // MARK: - Actions
@@ -129,13 +136,10 @@ class EmployeeCalendarViewModel: ObservableObject {
         }
     }
 
-    func shouldShowWeeklyHint(day: Int, canSelect: Bool, isSelected: Bool) -> Bool {
-        switch currentVacationMode {
-        case .monthly:
-            return false
-        case .weekly, .monthlyWithWeeklyLimit:
-            return canSelect && !isSelected
-        }
+    // 重命名方法：從 shouldShowWeeklyHint 改為 shouldShowSelectionHint
+    func shouldShowSelectionHint(day: Int, canSelect: Bool, isSelected: Bool) -> Bool {
+        // 所有模式都顯示可選擇且未選擇的日期
+        return canSelect && !isSelected
     }
 
     private func canSelectForWeeklyLimit(dateString: String) -> Bool {
@@ -234,5 +238,77 @@ class EmployeeCalendarViewModel: ObservableObject {
         self.toastMessage = message
         self.toastType = type
         self.isToastShowing = true
+    }
+}
+
+// MARK: - Vacation Limits Extension
+extension EmployeeCalendarViewModel {
+
+    /// 從管理者設定中載入休假限制
+    func loadVacationLimitsFromBossSettings() {
+        let components = availableVacationMonth.split(separator: "-")
+        guard components.count == 2,
+              let year = Int(components[0]),
+              let month = Int(components[1]) else {
+            return
+        }
+
+        let limits = VacationLimitsManager.shared.getVacationLimits(for: year, month: month)
+
+        // 更新 ViewModel 中的限制值
+        if let monthlyLimit = limits.monthlyLimit {
+            self.availableVacationDays = monthlyLimit
+        }
+
+        if let weeklyLimit = limits.weeklyLimit {
+            self.weeklyVacationLimit = weeklyLimit
+        }
+
+        // 檢查是否使用了老闆設定
+        self.isUsingBossSettings = VacationLimitsManager.shared.hasLimitsForMonth(year: year, month: month)
+    }
+
+    /// 檢查當前月份是否有管理者設定的限制
+    func hasBossSettingsForCurrentMonth() -> Bool {
+        let components = availableVacationMonth.split(separator: "-")
+        guard components.count == 2,
+              let year = Int(components[0]),
+              let month = Int(components[1]) else {
+            return false
+        }
+
+        return VacationLimitsManager.shared.hasLimitsForMonth(year: year, month: month)
+    }
+
+    /// 獲取當前月份的限制資訊
+    func getCurrentMonthLimits() -> VacationLimits? {
+        let components = availableVacationMonth.split(separator: "-")
+        guard components.count == 2,
+              let year = Int(components[0]),
+              let month = Int(components[1]) else {
+            return nil
+        }
+
+        return VacationLimitsManager.shared.getVacationLimits(for: year, month: month)
+    }
+
+    /// 設置限制更新監聽器
+    func setupVacationLimitsListener() {
+        NotificationCenter.default.addObserver(
+            forName: .vacationLimitsDidUpdate,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.loadVacationLimitsFromBossSettings()
+        }
+    }
+
+    /// 移除限制更新監聽器
+    func removeVacationLimitsListener() {
+        NotificationCenter.default.removeObserver(
+            self,
+            name: .vacationLimitsDidUpdate,
+            object: nil
+        )
     }
 }

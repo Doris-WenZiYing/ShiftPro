@@ -345,62 +345,10 @@ struct EmployeeCalendarView: View {
                     color: remaining > 0 ? .orange : .red
                 )
             }
-
-            // 週休統計顯示 (週休和月休模式都顯示)
-            if !viewModel.vacationData.selectedDates.isEmpty {
-                weeklyStatsView()
-            }
         }
         .padding(.horizontal, 24)
         .padding(.top, 45)
         .padding(.bottom, 16)
-    }
-
-    // MARK: - Weekly Stats View
-    private func weeklyStatsView() -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("週休統計")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.white)
-
-            let weeklyStats = getWeeklyStats()
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), spacing: 8) {
-                ForEach(Array(weeklyStats.keys.sorted()), id: \.self) { week in
-                    let count = weeklyStats[week] ?? 0
-                    let isOverLimit = count > viewModel.weeklyVacationLimit
-
-                    HStack(spacing: 6) {
-                        Text("第\(week)週")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.white.opacity(0.8))
-
-                        Spacer()
-
-                        Text("\(count) 天")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(isOverLimit ? .red : .white)
-
-                        Image(systemName: isOverLimit ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                            .font(.system(size: 10))
-                            .foregroundColor(isOverLimit ? .red : .green)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(isOverLimit ? Color.red.opacity(0.2) : Color.green.opacity(0.2))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(isOverLimit ? Color.red.opacity(0.5) : Color.green.opacity(0.3), lineWidth: 1)
-                    )
-                }
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(Color.white.opacity(0.05))
-        .cornerRadius(12)
     }
 
     // MARK: - Info Card
@@ -479,7 +427,8 @@ struct EmployeeCalendarView: View {
                         .stroke(Color(.systemGray5).opacity(0.2), lineWidth: 1)
                 )
 
-            if viewModel.shouldShowWeeklyHint(day: day, canSelect: canSelect, isSelected: isVacationSelected) {
+            // 修改這裡：使用新的方法名稱 shouldShowSelectionHint
+            if viewModel.shouldShowSelectionHint(day: day, canSelect: canSelect, isSelected: isVacationSelected) {
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(
                         LinearGradient(
@@ -590,9 +539,7 @@ struct EmployeeCalendarView: View {
 //                }
 
                 Button(action: {
-                    withAnimation(.linear(duration: 0.25)) {
-                        menuState.isMenuPresented.toggle()
-                    }
+                    menuState.isMenuPresented.toggle()
                 }) {
                     Image(systemName: "line.3.horizontal")
                         .font(.system(size: 22, weight: .medium))
