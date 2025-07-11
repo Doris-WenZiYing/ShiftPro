@@ -1,5 +1,5 @@
 //
-//  EmployeeCalendarView.swift
+//  EmployeeCalendarView.swift (完整週休邏輯版)
 //  ShiftPro
 //
 //  Created by Doris Wen on 2025/7/8.
@@ -12,12 +12,11 @@ struct EmployeeCalendarView: View {
     // MARK: - Properties
     @ObservedObject var controller: CalendarController = CalendarController(orientation: .vertical)
     @StateObject private var viewModel = EmployeeCalendarViewModel()
+    @ObservedObject var menuState: MenuState // 接收外部的 menuState
 
     // MARK: - UI State
     @State private var isBottomSheetPresented = false
     @State private var selectedAction: ShiftAction?
-    @State private var isVacationModeMenuPresented = false
-    @State private var isMenuPresented = false
     @State private var isDatePickerPresented = false
     @State private var selectedYear = Calendar.current.component(.year, from: Date())
     @State private var selectedMonth = Calendar.current.component(.month, from: Date())
@@ -37,9 +36,11 @@ struct EmployeeCalendarView: View {
             // Floating Overlays
             if !viewModel.isVacationEditMode {
                 topButtonsOverlay()
+                    .zIndex(1) // 確保按鈕在 menu 上方
             }
 
             editButtonOverlay()
+                .zIndex(2)
 
             // Toast
             ToastView(
@@ -47,18 +48,9 @@ struct EmployeeCalendarView: View {
                 type: viewModel.toastType,
                 isShowing: $viewModel.isToastShowing
             )
-            .zIndex(3)
+            .zIndex(5)
 
-            // Custom Menu - 側邊菜單浮層
-            if isMenuPresented {
-                CustomMenuOverlay(
-                    isPresented: $isMenuPresented,
-                    currentVacationMode: $viewModel.currentVacationMode,
-                    isVacationModeMenuPresented: $isVacationModeMenuPresented
-                )
-                .zIndex(4)
-                .ignoresSafeArea()
-            }
+            // 移除內部的 CustomMenuOverlay，現在由 ContentView 管理
         }
         .sheet(isPresented: $isBottomSheetPresented) {
             BottomSheetView(
@@ -76,16 +68,19 @@ struct EmployeeCalendarView: View {
                 controller: controller
             )
         }
-        .sheet(isPresented: $isVacationModeMenuPresented) {
-            VacationModeSelectionSheet(
-                currentMode: $viewModel.currentVacationMode,
-                weeklyLimit: $viewModel.weeklyVacationLimit,
-                monthlyLimit: $viewModel.availableVacationDays,
-                isPresented: $isVacationModeMenuPresented
-            )
-        }
+        // VacationModeSelectionSheet 現在由 ContentView 管理
         .onChange(of: selectedAction) { _, action in
             handleSelectedAction(action)
+        }
+        .onAppear {
+            // 同步 menuState 和 viewModel 的數據
+            menuState.currentVacationMode = viewModel.currentVacationMode
+        }
+        .onChange(of: viewModel.currentVacationMode) { _, newMode in
+            menuState.currentVacationMode = newMode
+        }
+        .onChange(of: menuState.currentVacationMode) { _, newMode in
+            viewModel.currentVacationMode = newMode
         }
     }
 
@@ -585,28 +580,24 @@ struct EmployeeCalendarView: View {
             HStack {
                 Spacer()
 
-                Button(action: {
-                    // TODO: share section
-                }) {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 20))
-                        .foregroundColor(.white)
-                        .padding(12)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Circle())
-                }
+//                Button(action: {
+//                    // TODO: share section
+//                }) {
+//                    Image(systemName: "square.and.arrow.up")
+//                        .font(.system(size: 22, weight: .medium))
+//                        .foregroundColor(.white)
+//                        .padding(12)
+//                }
 
                 Button(action: {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        isMenuPresented.toggle()
+                    withAnimation(.linear(duration: 0.25)) {
+                        menuState.isMenuPresented.toggle()
                     }
                 }) {
                     Image(systemName: "line.3.horizontal")
-                        .font(.system(size: 20))
+                        .font(.system(size: 22, weight: .medium))
                         .foregroundColor(.white)
                         .padding(12)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Circle())
                 }
             }
             .padding(.horizontal, 24)
@@ -752,5 +743,5 @@ struct EmployeeCalendarView: View {
 }
 
 #Preview {
-    EmployeeCalendarView()
+    EmployeeCalendarView(menuState: MenuState())
 }

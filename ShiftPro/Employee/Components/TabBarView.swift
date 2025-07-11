@@ -18,7 +18,7 @@ struct TabBarView: View {
             tabItem("line.3.horizontal", label: "More", tab: .more)
         }
         .padding(.top, 5)
-        .padding(.bottom, 12)
+        .padding(.bottom, hasHomeIndicator() ? 8 : 12) // 適應有 home indicator 的機型
         .background(Color.black)
     }
 
@@ -36,6 +36,14 @@ struct TabBarView: View {
         .onTapGesture {
             selectedTab = tab
         }
+    }
+
+    private func hasHomeIndicator() -> Bool {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first else {
+            return false
+        }
+        return window.safeAreaInsets.bottom > 0
     }
 }
 
