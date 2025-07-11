@@ -13,171 +13,247 @@ struct CustomMenuOverlay: View {
     @Binding var isVacationModeMenuPresented: Bool
 
     var body: some View {
-        ZStack {
-            // 半透明背景
-            Color.black.opacity(0.3)
-                .ignoresSafeArea()
-                .onTapGesture {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        isPresented = false
+        GeometryReader { geometry in
+            ZStack {
+                // 半透明背景遮罩
+                Color.black.opacity(0.4)
+                    .ignoresSafeArea(.all)
+                    .onTapGesture {
+                        closeMenu()
                     }
-                }
 
-            VStack {
-                HStack {
+                // 側邊菜單
+                HStack(spacing: 0) {
                     Spacer()
 
                     // 菜單內容
                     VStack(spacing: 0) {
-                        // 排休模式區域
+                        // Calendar 區域
                         VStack(spacing: 0) {
-                            // 區域標題
+                            // 標題
                             HStack {
-                                Image(systemName: "calendar.badge.clock")
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(.white.opacity(0.9))
-                                Text("排休模式")
-                                    .font(.system(size: 18, weight: .semibold))
+                                Text("Calendar")
+                                    .font(.system(size: 24, weight: .bold))
                                     .foregroundColor(.white)
                                 Spacer()
                             }
-                            .padding(.horizontal, 20)
-                            .padding(.top, 20)
-                            .padding(.bottom, 16)
+                            .padding(.horizontal, 24)
+                            .padding(.top, 60) // 適應狀態欄
+                            .padding(.bottom, 20)
 
-                            // 模式選項
+                            // Calendar 選項
                             VStack(spacing: 0) {
-                                ForEach(VacationMode.allCases, id: \.self) { mode in
-                                    menuItem(
-                                        icon: mode.icon,
-                                        title: mode.rawValue,
-                                        isSelected: currentVacationMode == mode
-                                    ) {
-                                        currentVacationMode = mode
-                                        withAnimation(.easeInOut(duration: 0.2)) {
-                                            isPresented = false
-                                        }
-                                    }
+                                MenuListItem(
+                                    icon: "doc.text",
+                                    title: "Agenda"
+                                ) {
+                                    // TODO: Agenda view
+                                    closeMenu()
+                                }
 
-                                    if mode != VacationMode.allCases.last {
-                                        Divider()
-                                            .background(Color.white.opacity(0.1))
-                                            .padding(.leading, 60)
-                                    }
+                                MenuListItem(
+                                    icon: "calendar",
+                                    title: "Day"
+                                ) {
+                                    // TODO: Day view
+                                    closeMenu()
+                                }
+
+                                MenuListItem(
+                                    icon: "doc.text",
+                                    title: "Week"
+                                ) {
+                                    // TODO: Week view
+                                    closeMenu()
+                                }
+
+                                MenuListItem(
+                                    icon: "doc.text",
+                                    title: "Month"
+                                ) {
+                                    // TODO: Month view
+                                    closeMenu()
+                                }
+
+                                MenuListItem(
+                                    icon: "calendar.badge.plus",
+                                    title: "Year"
+                                ) {
+                                    // TODO: Year view
+                                    closeMenu()
                                 }
                             }
-
-                            Divider()
-                                .background(Color.white.opacity(0.2))
-                                .padding(.vertical, 8)
-
-                            // 排休設定按鈕
-                            menuItem(
-                                icon: "gear",
-                                title: "排休設定",
-                                isSelected: false
-                            ) {
-                                isVacationModeMenuPresented = true
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    isPresented = false
-                                }
-                            }
+                            .padding(.bottom, 32)
                         }
 
-                        Divider()
-                            .background(Color.white.opacity(0.3))
-                            .padding(.vertical, 8)
-
-                        // 其他功能區域
+                        // Events 區域
                         VStack(spacing: 0) {
-                            menuItem(icon: "square.and.arrow.up", title: "分享排班表", isSelected: false) {
-                                // TODO: 分享功能
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    isPresented = false
+                            // 標題
+                            HStack {
+                                Text("Events")
+                                    .font(.system(size: 24, weight: .bold))
+                                    .foregroundColor(.white)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 24)
+                            .padding(.bottom, 20)
+
+                            // Events 選項
+                            VStack(spacing: 0) {
+                                MenuListItem(
+                                    icon: "checkmark.square",
+                                    title: "排休模式",
+                                    subtitle: currentVacationMode.rawValue
+                                ) {
+                                    closeMenu()
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                        isVacationModeMenuPresented = true
+                                    }
+                                }
+
+                                MenuListItem(
+                                    icon: "gearshape",
+                                    title: "排休設定"
+                                ) {
+                                    closeMenu()
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                        isVacationModeMenuPresented = true
+                                    }
+                                }
+
+                                MenuListItem(
+                                    icon: "square.and.arrow.up",
+                                    title: "分享排班表"
+                                ) {
+                                    // TODO: 分享功能
+                                    closeMenu()
+                                }
+
+                                MenuListItem(
+                                    icon: "square.and.arrow.down",
+                                    title: "匯出資料"
+                                ) {
+                                    // TODO: 匯出功能
+                                    closeMenu()
                                 }
                             }
-
-                            Divider()
-                                .background(Color.white.opacity(0.1))
-                                .padding(.leading, 60)
-
-                            menuItem(icon: "square.and.arrow.down", title: "匯出資料", isSelected: false) {
-                                // TODO: 匯出功能
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    isPresented = false
-                                }
-                            }
-
-                            Divider()
-                                .background(Color.white.opacity(0.1))
-                                .padding(.leading, 60)
-
-                            menuItem(icon: "questionmark.circle", title: "關於", isSelected: false) {
-                                // TODO: 關於頁面
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    isPresented = false
-                                }
-                            }
+                            .padding(.bottom, 24)
                         }
-                        .padding(.bottom, 16)
-                    }
-                    .background(
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(.ultraThinMaterial)
-                            .background(Color.black.opacity(0.8))
-                    )
-                    .frame(width: 280)
-                    .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 10)
-                }
-                .padding(.horizontal, 24)
-                .padding(.top, 80)
 
-                Spacer()
+                        Spacer()
+
+                        // Show More 按鈕
+                        Button(action: {
+                            // TODO: Show more functionality
+                            closeMenu()
+                        }) {
+                            HStack {
+                                Spacer()
+                                Text("Show More")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.white)
+                                Spacer()
+                            }
+                            .padding(.vertical, 16)
+                            .background(
+                                RoundedRectangle(cornerRadius: 25)
+                                    .fill(Color.blue)
+                            )
+                        }
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 34) // 適應底部安全區域
+                    }
+                    .frame(width: 320)
+                    .background(
+                        Rectangle()
+                            .fill(Color(.systemGray6).opacity(0.95))
+                            .background(Color.black.opacity(0.85))
+                    )
+                    .shadow(color: .black.opacity(0.3), radius: 20, x: -5, y: 0)
+                    .offset(x: isPresented ? 0 : 320) // 側邊滑動效果
+                    .animation(.easeInOut(duration: 0.3), value: isPresented)
+                }
             }
         }
-        .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .topTrailing)))
+        .transition(.identity) // 移除默認轉場，使用自定義動畫
     }
 
-    // MARK: - 菜單項目
-    private func menuItem(
-        icon: String,
-        title: String,
-        isSelected: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
+    private func closeMenu() {
+        withAnimation(.easeInOut(duration: 0.3)) {
+            isPresented = false
+        }
+    }
+}
+
+// MARK: - MenuListItem 組件
+struct MenuListItem: View {
+    let icon: String
+    let title: String
+    var subtitle: String? = nil
+    let action: () -> Void
+
+    @State private var isPressed = false
+
+    var body: some View {
         Button(action: action) {
             HStack(spacing: 16) {
+                // 圖標
                 Image(systemName: icon)
                     .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(isSelected ? .blue : .white.opacity(0.9))
+                    .foregroundColor(.white.opacity(0.8))
                     .frame(width: 24, height: 24)
 
-                Text(title)
-                    .font(.system(size: 16, weight: isSelected ? .semibold : .medium))
-                    .foregroundColor(isSelected ? .blue : .white)
+                // 文字內容
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+
+                    if let subtitle = subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundColor(.white.opacity(0.6))
+                            .lineLimit(1)
+                    }
+                }
 
                 Spacer()
-
-                if isSelected {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.blue)
-                }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 16)
             .background(
-                isSelected ?
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.blue.opacity(0.15))
-                        .padding(.horizontal, 8) :
-                    nil
+                Rectangle()
+                    .fill(isPressed ? Color.white.opacity(0.1) : Color.clear)
             )
         }
         .buttonStyle(PlainButtonStyle())
+        .onPressGesture(
+            onPress: { isPressed = true },
+            onRelease: { isPressed = false }
+        )
+    }
+}
+
+// MARK: - 按壓手勢擴展
+extension View {
+    func onPressGesture(onPress: @escaping () -> Void, onRelease: @escaping () -> Void) -> some View {
+        self.simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in onPress() }
+                .onEnded { _ in onRelease() }
+        )
     }
 }
 
 #Preview {
-    CustomMenuOverlay(isPresented: .constant(true), currentVacationMode: .constant(.monthly), isVacationModeMenuPresented: .constant(true))
+    ZStack {
+        Color.black.ignoresSafeArea()
+
+        CustomMenuOverlay(
+            isPresented: .constant(true),
+            currentVacationMode: .constant(.monthly),
+            isVacationModeMenuPresented: .constant(false)
+        )
+    }
 }

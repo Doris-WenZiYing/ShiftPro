@@ -42,13 +42,9 @@ struct CalendarGridView: View {
                 isSelected ? .black : (isInMonth ? .white : .gray.opacity(0.5))
             )
             .onTapGesture {
-                // Allow selection of dates from any visible month
-                if isInMonth {
+                // Only allow selection of dates within current month (offset 0)
+                if monthOffset == 0 && isInMonth {
                     viewModel.selectedDate = day.date
-                    // Update current month if selecting from a different month
-                    if monthOffset != 0 {
-                        viewModel.currentMonth = Calendar.current.date(from: Calendar.current.dateComponents([.year, .month], from: day.date)) ?? viewModel.currentMonth
-                    }
                 }
             }
     }
