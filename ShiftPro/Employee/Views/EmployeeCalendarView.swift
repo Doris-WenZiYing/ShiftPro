@@ -1,5 +1,5 @@
 //
-//  EmployeeCalendarView.swift (完整週休邏輯版)
+//  EmployeeCalendarView.swift
 //  ShiftPro
 //
 //  Created by Doris Wen on 2025/7/8.
@@ -20,6 +20,10 @@ struct EmployeeCalendarView: View {
     @State private var isDatePickerPresented = false
     @State private var selectedYear = Calendar.current.component(.year, from: Date())
     @State private var selectedMonth = Calendar.current.component(.month, from: Date())
+
+    // 🔥 新增：追踪已載入的月份，避免重複載入
+    @State private var loadedMonths: Set<String> = []
+    @State private var isInitialLoad = true
 
     var body: some View {
         ZStack {
@@ -49,8 +53,6 @@ struct EmployeeCalendarView: View {
                 isShowing: $viewModel.isToastShowing
             )
             .zIndex(5)
-
-            // 移除內部的 CustomMenuOverlay，現在由 ContentView 管理
         }
         .sheet(isPresented: $isBottomSheetPresented) {
             BottomSheetView(
@@ -68,11 +70,23 @@ struct EmployeeCalendarView: View {
                 controller: controller
             )
         }
-        // VacationModeSelectionSheet 現在由 ContentView 管理
         .onChange(of: selectedAction) { _, action in
             handleSelectedAction(action)
         }
         .onAppear {
+            // 🔥 修正：只在初次載入時同步當前月份數據
+            if isInitialLoad {
+                let currentDate = Date()
+                let currentYear = Calendar.current.component(.year, from: currentDate)
+                let currentMonth = Calendar.current.component(.month, from: currentDate)
+                let currentMonthString = String(format: "%04d-%02d", currentYear, currentMonth)
+
+                print("📱 初次載入 - 當前月份: \(currentMonthString)")
+                viewModel.updateDisplayMonth(year: currentYear, month: currentMonth)
+                loadedMonths.insert(currentMonthString)
+                isInitialLoad = false
+            }
+
             // 同步 menuState 和 viewModel 的數據
             menuState.currentVacationMode = viewModel.currentVacationMode
         }
@@ -98,6 +112,20 @@ struct EmployeeCalendarView: View {
                     calendarGridView(month: month, cellHeight: cellHeight)
                 }
             }
+            // 🔥 修正：只在月份真正變化且未載入過時才更新數據
+            .onAppear {
+                handleMonthAppear(month: month)
+            }
+        }
+    }
+
+    // 🔥 新增：處理月份出現的方法
+    private func handleMonthAppear(month: CalendarMonth) {
+        let monthString = String(format: "%04d-%02d", month.year, month.month)
+        if !loadedMonths.contains(monthString) {
+            print("📅 載入新月份: \(monthString)")
+            viewModel.updateDisplayMonth(year: month.year, month: month.month)
+            loadedMonths.insert(monthString)
         }
     }
 
@@ -166,22 +194,60 @@ struct EmployeeCalendarView: View {
                 }
             }
 
-            // Vacation Status Badge
+            // 🔥 修正：基於當前顯示月份和設定狀態顯示 Badge
             let currentDisplayMonth = String(format: "%04d-%02d", month.year, month.month)
-            if currentDisplayMonth == viewModel.availableVacationMonth && !viewModel.isVacationEditMode {
-                HStack(spacing: 6) {
-                    Image(systemName: viewModel.vacationData.isSubmitted ? "checkmark.circle.fill" : "calendar.badge.checkmark")
-                        .font(.system(size: 12))
-                        .foregroundColor(viewModel.vacationData.isSubmitted ? .green : .blue)
+            let isCurrentMonth = currentDisplayMonth == viewModel.getCurrentMonthString()
 
-                    Text(viewModel.vacationData.isSubmitted ? "已排休" : "可排休")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(viewModel.vacationData.isSubmitted ? .green : .blue)
+            if currentDisplayMonth == viewModel.currentDisplayMonth && !viewModel.isVacationEditMode {
+
+                // 如果有老闆設定且已發佈
+                if viewModel.isUsingBossSettings {
+                    HStack(spacing: 6) {
+                        Image(systemName: viewModel.vacationData.isSubmitted ? "checkmark.circle.fill" : "calendar.badge.checkmark")
+                            .font(.system(size: 12))
+                            .foregroundColor(viewModel.vacationData.isSubmitted ? .green : .blue)
+
+                        Text(viewModel.vacationData.isSubmitted ? "已排休" : "可排休")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(viewModel.vacationData.isSubmitted ? .green : .blue)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background((viewModel.vacationData.isSubmitted ? Color.green : Color.blue).opacity(0.2))
+                    .cornerRadius(16)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background((viewModel.vacationData.isSubmitted ? Color.green : Color.blue).opacity(0.2))
-                .cornerRadius(16)
+                // 如果是當前月份但老闆尚未發佈
+                else if isCurrentMonth {
+                    HStack(spacing: 6) {
+                        Image(systemName: "clock.circle")
+                            .font(.system(size: 12))
+                            .foregroundColor(.orange)
+
+                        Text("等待發佈")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.orange)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.orange.opacity(0.2))
+                    .cornerRadius(16)
+                }
+                // 如果是其他月份且老闆尚未發佈
+                else {
+                    HStack(spacing: 6) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 12))
+                            .foregroundColor(.gray)
+
+                        Text("尚未設定")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.gray)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.gray.opacity(0.2))
+                    .cornerRadius(16)
+                }
             }
         }
         .padding(.horizontal, 24)
@@ -290,7 +356,7 @@ struct EmployeeCalendarView: View {
                         .foregroundColor(.white)
 
                     HStack(spacing: 8) {
-                        Text(viewModel.formatMonthString(viewModel.availableVacationMonth))
+                        Text(viewModel.formatMonthString(viewModel.currentDisplayMonth))
                             .font(.system(size: 16))
                             .foregroundColor(.white.opacity(0.8))
 
@@ -321,7 +387,7 @@ struct EmployeeCalendarView: View {
                 }
             }
 
-            // Info Cards
+            // 🔥 優化：Info Cards with enhanced weekly info
             HStack(spacing: 12) {
                 infoCard(
                     title: viewModel.vacationData.isSubmitted ? "已排休" : "可排休",
@@ -345,10 +411,174 @@ struct EmployeeCalendarView: View {
                     color: remaining > 0 ? .orange : .red
                 )
             }
+
+            // 🔥 新增：週休限制資訊卡
+            if viewModel.currentVacationMode == .weekly || viewModel.currentVacationMode == .monthlyWithWeeklyLimit {
+                weeklyLimitInfoCard()
+            }
+
+            // 週休統計顯示 (週休和月休模式都顯示)
+            if !viewModel.vacationData.selectedDates.isEmpty {
+                weeklyStatsView()
+            }
         }
         .padding(.horizontal, 24)
         .padding(.top, 45)
         .padding(.bottom, 16)
+    }
+
+    // MARK: - 🔥 修復：週休限制資訊卡
+    private func weeklyLimitInfoCard() -> some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "calendar.day.timeline.leading")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.blue)
+
+                Text("週休限制")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+
+                Spacer()
+
+                Text("每週最多 \(viewModel.weeklyVacationLimit) 天")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.blue)
+            }
+
+            HStack {
+                Text("週一～週日為一週")
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.7))
+
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.blue.opacity(0.15))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.blue.opacity(0.3), lineWidth: 1)
+                )
+        )
+    }
+
+    // MARK: - 🔥 修復：週休統計視圖 (分解複雜表達式)
+    private func weeklyStatsView() -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("週休統計")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.white)
+
+            weeklyStatsGrid()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color.white.opacity(0.05))
+        .cornerRadius(12)
+    }
+
+    // 🔥 新增：分離的週休統計網格
+    private func weeklyStatsGrid() -> some View {
+        let weeklyStats = getWeeklyStats()
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 2)
+
+        return LazyVGrid(columns: columns, spacing: 8) {
+            ForEach(Array(weeklyStats.keys.sorted()), id: \.self) { week in
+                weeklyStatsCard(week: week, count: weeklyStats[week] ?? 0)
+            }
+        }
+    }
+
+    // 🔥 新增：單個週休統計卡片
+    private func weeklyStatsCard(week: Int, count: Int) -> some View {
+        let isOverLimit = count > viewModel.weeklyVacationLimit
+        let isAtLimit = count == viewModel.weeklyVacationLimit
+        let weekRangeText = getWeekRangeText(for: week)
+
+        return VStack(spacing: 4) {
+            HStack(spacing: 6) {
+                Text("第\(week)週")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white.opacity(0.8))
+
+                Spacer()
+
+                Text("\(count)/\(viewModel.weeklyVacationLimit)")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(statusColor(isOverLimit: isOverLimit, isAtLimit: isAtLimit))
+
+                Image(systemName: statusIcon(isOverLimit: isOverLimit, isAtLimit: isAtLimit))
+                    .font(.system(size: 10))
+                    .foregroundColor(statusColor(isOverLimit: isOverLimit, isAtLimit: isAtLimit))
+            }
+
+            if !weekRangeText.isEmpty {
+                HStack {
+                    Text(weekRangeText)
+                        .font(.system(size: 10))
+                        .foregroundColor(.white.opacity(0.6))
+                    Spacer()
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(statusBackgroundColor(isOverLimit: isOverLimit, isAtLimit: isAtLimit))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(statusBorderColor(isOverLimit: isOverLimit, isAtLimit: isAtLimit), lineWidth: 1)
+        )
+    }
+
+    // MARK: - 🔥 新增：狀態輔助方法
+    private func statusColor(isOverLimit: Bool, isAtLimit: Bool) -> Color {
+        if isOverLimit { return .red }
+        if isAtLimit { return .orange }
+        return .white
+    }
+
+    private func statusIcon(isOverLimit: Bool, isAtLimit: Bool) -> String {
+        if isOverLimit { return "exclamationmark.triangle.fill" }
+        if isAtLimit { return "checkmark.circle.fill" }
+        return "circle"
+    }
+
+    private func statusBackgroundColor(isOverLimit: Bool, isAtLimit: Bool) -> Color {
+        if isOverLimit { return Color.red.opacity(0.2) }
+        if isAtLimit { return Color.orange.opacity(0.2) }
+        return Color.green.opacity(0.15)
+    }
+
+    private func statusBorderColor(isOverLimit: Bool, isAtLimit: Bool) -> Color {
+        if isOverLimit { return Color.red.opacity(0.5) }
+        if isAtLimit { return Color.orange.opacity(0.5) }
+        return Color.green.opacity(0.3)
+    }
+
+    // 🔥 新增：獲取週範圍文字
+    private func getWeekRangeText(for weekNumber: Int) -> String {
+        let calendar = Calendar.current
+        let components = viewModel.currentDisplayMonth.split(separator: "-")
+        guard let year = Int(components[0]), let month = Int(components[1]) else { return "" }
+
+        // 找到該週的任一天來計算範圍
+        for day in 1...31 {
+            if let date = calendar.date(from: DateComponents(year: year, month: month, day: day)),
+               calendar.component(.weekOfMonth, from: date) == weekNumber {
+                return WeekUtils.formatWeekRange(
+                    WeekUtils.getWeekRange(for: date).start,
+                    WeekUtils.getWeekRange(for: date).end
+                )
+            }
+        }
+        return ""
     }
 
     // MARK: - Info Card
@@ -375,7 +605,7 @@ struct EmployeeCalendarView: View {
     // MARK: - Edit Mode Calendar Grid
     private func editModeCalendarGrid(cellHeight: CGFloat) -> some View {
         let calendar = Calendar.current
-        let components = viewModel.availableVacationMonth.split(separator: "-")
+        let components = viewModel.currentDisplayMonth.split(separator: "-")
         let year = Int(components[0]) ?? 2024
         let month = Int(components[1]) ?? 7
 
@@ -412,9 +642,9 @@ struct EmployeeCalendarView: View {
         .drawingGroup()
     }
 
-    // MARK: - Edit Mode Calendar Cell
+    // MARK: - Edit Mode Calendar Cell (優化版)
     private func editModeCalendarCell(day: Int, cellHeight: CGFloat) -> some View {
-        let dateString = String(format: "%@-%02d", viewModel.availableVacationMonth, day)
+        let dateString = String(format: "%@-%02d", viewModel.currentDisplayMonth, day)
         let isVacationSelected = viewModel.vacationData.isDateSelected(dateString)
         let canSelect = viewModel.canSelectForCurrentMode(day: day)
 
@@ -427,7 +657,6 @@ struct EmployeeCalendarView: View {
                         .stroke(Color(.systemGray5).opacity(0.2), lineWidth: 1)
                 )
 
-            // 修改這裡：使用新的方法名稱 shouldShowSelectionHint
             if viewModel.shouldShowSelectionHint(day: day, canSelect: canSelect, isSelected: isVacationSelected) {
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(
@@ -491,32 +720,42 @@ struct EmployeeCalendarView: View {
             let impactFeedback = UIImpactFeedbackGenerator(style: .light)
             impactFeedback.impactOccurred()
 
-            // 檢查週休限制
-            if viewModel.currentVacationMode == .weekly {
-                let weekOfMonth = getWeekOfMonth(for: day)
-                let currentWeekCount = getWeeklyStats()[weekOfMonth] ?? 0
-
-                if !isVacationSelected && currentWeekCount >= viewModel.weeklyVacationLimit {
-                    // 顯示錯誤提示
-                    viewModel.showToast(
-                        message: "已超過第 \(weekOfMonth) 週最多可排 \(viewModel.weeklyVacationLimit) 天",
-                        type: .error
-                    )
-                    return
-                }
-            }
-
-            viewModel.toggleVacationDate(dateString)
+            // 🔥 優化：更完善的週休限制檢查邏輯
+            handleVacationDateSelection(dateString: dateString, day: day, isCurrentlySelected: isVacationSelected)
         }
+    }
+
+    // 🔥 新增：處理排休日期選擇的核心邏輯
+    private func handleVacationDateSelection(dateString: String, day: Int, isCurrentlySelected: Bool) {
+        // 直接使用 ViewModel 的 toggleVacationDate 方法，它已經包含了所有邏輯
+        viewModel.toggleVacationDate(dateString)
     }
 
     // MARK: - Edit Mode Bottom Info
     private func editModeBottomInfo() -> some View {
         VStack(spacing: 8) {
+            // 🔥 優化：顯示更詳細的底部資訊
             if !viewModel.vacationData.selectedDates.isEmpty {
-                Text("已選擇: \(viewModel.vacationData.selectedDates.count) 天")
-                    .font(.system(size: 14))
-                    .foregroundColor(.white.opacity(0.8))
+                HStack(spacing: 16) {
+                    Text("已選擇: \(viewModel.vacationData.selectedDates.count) 天")
+                        .font(.system(size: 14))
+                        .foregroundColor(.white.opacity(0.8))
+
+                    if viewModel.currentVacationMode == .weekly || viewModel.currentVacationMode == .monthlyWithWeeklyLimit {
+                        if viewModel.hasWeeklyConflicts() {
+                            HStack(spacing: 4) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.red)
+                                Text("週限制超標")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(.red)
+                            }
+                        }
+                    }
+
+                    Spacer()
+                }
             }
         }
         .padding(.horizontal, 24)
@@ -529,17 +768,10 @@ struct EmployeeCalendarView: View {
             HStack {
                 Spacer()
 
-//                Button(action: {
-//                    // TODO: share section
-//                }) {
-//                    Image(systemName: "square.and.arrow.up")
-//                        .font(.system(size: 22, weight: .medium))
-//                        .foregroundColor(.white)
-//                        .padding(12)
-//                }
-
                 Button(action: {
-                    menuState.isMenuPresented.toggle()
+                    withAnimation(.linear(duration: 0.25)) {
+                        menuState.isMenuPresented.toggle()
+                    }
                 }) {
                     Image(systemName: "line.3.horizontal")
                         .font(.system(size: 22, weight: .medium))
@@ -565,20 +797,6 @@ struct EmployeeCalendarView: View {
                     VStack(spacing: 12) {
                         if !viewModel.vacationData.selectedDates.isEmpty && !viewModel.vacationData.isSubmitted {
                             Button(action: {
-                                // 在提交前檢查週休限制
-                                if viewModel.currentVacationMode == .weekly {
-                                    let weeklyStats = getWeeklyStats()
-                                    let hasOverLimit = weeklyStats.values.contains { $0 > viewModel.weeklyVacationLimit }
-
-                                    if hasOverLimit {
-                                        viewModel.showToast(
-                                            message: "請檢查週休限制，每週最多可排 \(viewModel.weeklyVacationLimit) 天",
-                                            type: .error
-                                        )
-                                        return
-                                    }
-                                }
-
                                 viewModel.submitVacation()
                             }) {
                                 HStack(spacing: 8) {
@@ -643,7 +861,7 @@ struct EmployeeCalendarView: View {
     /// 獲取指定日期屬於當月的第幾週
     private func getWeekOfMonth(for day: Int) -> Int {
         let calendar = Calendar.current
-        let components = viewModel.availableVacationMonth.split(separator: "-")
+        let components = viewModel.currentDisplayMonth.split(separator: "-")
         let year = Int(components[0]) ?? 2024
         let month = Int(components[1]) ?? 7
 
@@ -656,29 +874,7 @@ struct EmployeeCalendarView: View {
 
     /// 獲取當前選中日期的週統計
     private func getWeeklyStats() -> [Int: Int] {
-        var weeklyStats: [Int: Int] = [:]
-        let calendar = Calendar.current
-        let components = viewModel.availableVacationMonth.split(separator: "-")
-        let year = Int(components[0]) ?? 2024
-        let month = Int(components[1]) ?? 7
-
-        for dateString in viewModel.vacationData.selectedDates {
-            // 解析日期字符串 (格式: "2024-07-15")
-            let dateParts = dateString.split(separator: "-")
-            if dateParts.count == 3,
-               let dayNum = Int(dateParts[2]),
-               let dateYear = Int(dateParts[0]),
-               let dateMonth = Int(dateParts[1]),
-               dateYear == year && dateMonth == month {
-
-                if let date = calendar.date(from: DateComponents(year: year, month: month, day: dayNum)) {
-                    let weekOfMonth = calendar.component(.weekOfMonth, from: date)
-                    weeklyStats[weekOfMonth, default: 0] += 1
-                }
-            }
-        }
-
-        return weeklyStats
+        return viewModel.getWeeklyStats()
     }
 
     // MARK: - Action Handlers
