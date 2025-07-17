@@ -178,7 +178,7 @@ class BossCalendarViewModel: ObservableObject {
         }
     }
 
-    private func savePublishStatus() {
+    func savePublishStatus() {
         let status = BossPublishStatus(
             vacationPublished: isVacationPublished,
             schedulePublished: isSchedulePublished,

@@ -393,20 +393,35 @@ struct BossSettingsView: View {
 
     // MARK: - Helper Methods
     private func loadCurrentSettings() {
-        let limits = VacationLimitsManager.shared.getVacationLimits(for: selectedYear, month: selectedMonth)
+        print("🔍 從 Firebase 載入當前設定...")
 
-        if let monthlyLimit = limits.monthlyLimit {
-            self.monthlyLimit = monthlyLimit
-        }
-        if let weeklyLimit = limits.weeklyLimit {
-            self.weeklyLimit = weeklyLimit
-        }
+        VacationLimitsManager.shared.loadVacationLimitsFromFirebase(for: selectedYear, month: selectedMonth) { limits in
+            DispatchQueue.main.async {
+                if let limits = limits {
+                    print("✅ 從 Firebase 載入設定成功")
 
-        self.vacationType = limits.vacationType
+                    if let monthlyLimit = limits.monthlyLimit {
+                        self.monthlyLimit = monthlyLimit
+                    }
+                    if let weeklyLimit = limits.weeklyLimit {
+                        self.weeklyLimit = weeklyLimit
+                    }
+
+                    self.vacationType = limits.vacationType
+
+                } else {
+                    print("📱 Firebase 中無該月份設定，使用默認值")
+                    self.loadCurrentSettings()
+                }
+            }
+        }
     }
 
-    private func publishVacationSettings() {
-        print("🚀 開始發佈排休設定...")
+    func publishVacationSettings() {
+        print("🚀 開始發佈排休設定到 Firebase...")
+
+        // 🔥 先測試 Firebase 連接
+        FirebaseDebugHelper.shared.testFirebaseConnection()
 
         let limits = VacationLimits(
             monthlyLimit: vacationType == .monthly ? monthlyLimit : nil,
@@ -418,28 +433,31 @@ struct BossSettingsView: View {
             vacationType: vacationType
         )
 
-        print("📦 即將發佈的設定:")
+        print("📦 即將發佈到 Firebase 的設定:")
         print("   月份: \(selectedYear)-\(selectedMonth)")
         print("   類型: \(vacationType.rawValue)")
         print("   月限制: \(limits.monthlyLimit ?? 0)")
         print("   週限制: \(limits.weeklyLimit ?? 0)")
         print("   已發佈: \(limits.isPublished)")
 
-        let success = VacationLimitsManager.shared.saveVacationLimitsWithNotification(limits)
-        if success {
-            alertMessage = "排休設定已成功發佈給員工！\n\n目標月份: \(String(format: "%04d年%02d月", selectedYear, selectedMonth))\n排休類型: \(vacationType.displayName)\n限制天數: \(vacationType == .monthly ? monthlyLimit : weeklyLimit) 天\n\n員工現在可以開始排休了！"
-            showingSuccessAlert = true
-            print("✅ 發佈成功！員工端應該收到通知")
+        // 🔥 使用 Firebase 同步版本
+        let success = VacationLimitsManager.shared.saveVacationLimitsWithFirebaseSync(limits)
 
-            // 🔥 發佈成功後延遲關閉 Sheet（如果用戶沒有點擊確定）
+        if success {
+            alertMessage = "排休設定已成功發佈到雲端！\n\n目標月份: \(String(format: "%04d年%02d月", selectedYear, selectedMonth))\n排休類型: \(vacationType.displayName)\n限制天數: \(vacationType == .monthly ? monthlyLimit : weeklyLimit) 天\n\n員工現在可以開始排休了！"
+            showingSuccessAlert = true
+            print("✅ 發佈成功！已同步到 Firebase")
+
+            // 🔥 發佈成功後延遲關閉 Sheet
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                if showingSuccessAlert {
-                    showingSuccessAlert = false
-                    dismiss()
+                if self.showingSuccessAlert {
+                    self.showingSuccessAlert = false
+                    self.dismiss()
                 }
             }
+
         } else {
-            alertMessage = "發佈失敗，請重試"
+            alertMessage = "發佈失敗，請檢查網絡連接後重試"
             showingSuccessAlert = true
             print("❌ 發佈失敗！")
         }

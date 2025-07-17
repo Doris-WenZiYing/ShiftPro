@@ -52,8 +52,10 @@ class EmployeeCalendarViewModel: ObservableObject {
             print("📅 員工端切換到月份: \(newMonth)")
             currentDisplayMonth = newMonth
 
-            // 重新加載該月份的設定和數據
-            loadVacationLimitsFromBossSettings()
+            // 🔥 優先從 Firebase 載入該月份的設定
+            loadVacationLimitsFromFirebaseForCurrentMonth()
+
+            // 載入該月份的排休數據
             loadVacationData()
         }
     }
@@ -62,20 +64,18 @@ class EmployeeCalendarViewModel: ObservableObject {
     func handleVacationAction(_ action: ShiftAction) {
         switch action {
         case .editVacation:
-            let currentMonth = getCurrentMonthString()
-            if currentDisplayMonth != currentMonth {
-                showToast("只能編輯當前月份 (\(formatMonthString(currentMonth))) 的排休", type: .error)
-                return
-            }
+            // 🔥 移除當前月份限制，允許編輯未來月份
+            print("🔧 嘗試編輯月份: \(currentDisplayMonth)")
 
             if vacationData.isSubmitted {
                 showToast("本月排休已提交，無法修改", type: .error)
                 return
             }
 
-            // 檢查是否有老闆發佈的設定
+            // 🔥 修正：檢查是否有老闆發佈的設定（當前顯示月份）
             if !hasBossSettingsForDisplayMonth() {
-                showToast("等待老闆發佈排休設定", type: .info)
+                let monthText = formatMonthString(currentDisplayMonth)
+                showToast("等待老闆發佈 \(monthText) 的排休設定", type: .info)
                 return
             }
 
@@ -569,4 +569,107 @@ extension EmployeeCalendarViewModel {
             object: nil
         )
     }
+}
+
+// MARK: Firebase
+extension EmployeeCalendarViewModel {
+    private func loadVacationLimitsFromFirebaseForCurrentMonth() {
+            let components = currentDisplayMonth.split(separator: "-")
+            guard components.count == 2,
+                  let year = Int(components[0]),
+                  let month = Int(components[1]) else {
+                print("❌ 無法解析月份: \(currentDisplayMonth)")
+                return
+            }
+
+            print("🔍 從 Firebase 載入月份設定: \(year)-\(month)")
+
+            VacationLimitsManager.shared.loadVacationLimitsFromFirebase(for: year, month: month) { [weak self] limits in
+                DispatchQueue.main.async {
+                    if let limits = limits {
+                        print("✅ 從 Firebase 載入成功: \(limits.vacationType.rawValue)")
+
+                        // 更新 ViewModel 中的限制值
+                        if let monthlyLimit = limits.monthlyLimit {
+                            self?.availableVacationDays = monthlyLimit
+                        }
+
+                        if let weeklyLimit = limits.weeklyLimit {
+                            self?.weeklyVacationLimit = weeklyLimit
+                        }
+
+                        // 根據老闆設定的類型更新員工端的模式
+                        switch limits.vacationType {
+                        case .monthly:
+                            self?.currentVacationMode = .monthly
+                        case .weekly:
+                            self?.currentVacationMode = .weekly
+                        case .flexible:
+                            self?.currentVacationMode = .monthly
+                        }
+
+                        self?.isUsingBossSettings = limits.isPublished
+
+                        print("✅ 員工端已應用 Firebase 設定")
+                        print("   類型: \(limits.vacationType.rawValue)")
+                        print("   月限制: \(limits.monthlyLimit ?? 0)")
+                        print("   週限制: \(limits.weeklyLimit ?? 0)")
+
+                    } else {
+                        print("⏳ Firebase 中無該月份設定，使用默認值")
+                        self?.loadVacationLimitsFromBossSettings()
+                    }
+                }
+            }
+        }
+
+    // MARK: - 🔥 新增：獲取月份顯示文字
+        func getMonthDisplayText() -> String {
+            let currentMonth = getCurrentMonthString()
+
+            if currentDisplayMonth == currentMonth {
+                return "本月"
+            } else {
+                return formatMonthString(currentDisplayMonth)
+            }
+        }
+
+        // MARK: - 🔥 新增：檢查月份是否可以編輯
+        func canEditMonth() -> Bool {
+            // 允許編輯當前月份和未來月份
+            let currentMonth = getCurrentMonthString()
+            return currentDisplayMonth >= currentMonth
+        }
+
+        // MARK: - 🔥 新增：檢查是否為未來月份
+        func isFutureMonth() -> Bool {
+            let currentMonth = getCurrentMonthString()
+            return currentDisplayMonth > currentMonth
+        }
+
+        // MARK: - 🔥 新增：獲取月份編輯狀態文字
+        func getMonthEditStatusText() -> String {
+            let currentMonth = getCurrentMonthString()
+
+            if currentDisplayMonth == currentMonth {
+                return isUsingBossSettings ? "可排休" : "等待發佈"
+            } else if currentDisplayMonth > currentMonth {
+                return isUsingBossSettings ? "可預約排休" : "等待發佈"
+            } else {
+                return "已過期"
+            }
+        }
+
+        // MARK: - 🔥 新增：獲取月份編輯狀態顏色
+        func getMonthEditStatusColor() -> Color {
+            let currentMonth = getCurrentMonthString()
+
+            if currentDisplayMonth == currentMonth {
+                return isUsingBossSettings ? .green : .orange
+            } else if currentDisplayMonth > currentMonth {
+                return isUsingBossSettings ? .blue : .orange
+            } else {
+                return .gray
+            }
+        }
 }

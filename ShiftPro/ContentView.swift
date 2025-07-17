@@ -12,6 +12,10 @@ struct ContentView: View {
     @StateObject private var menuState = MenuState()
     @AppStorage("isBoss") private var isBoss: Bool = false
 
+    // 🔥 新增：Firebase 測試相關狀態
+    @State private var showingFirebaseTest = false
+    @State private var firebaseTestCount = 0
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -48,6 +52,13 @@ struct ContentView: View {
                 .ignoresSafeArea(.all)
                 .transition(.move(edge: .trailing))
             }
+
+            // 🔥 新增：Firebase 測試入口（隱藏的開發者選項）
+            if showingFirebaseTest {
+                FirebaseTestView()
+                    .zIndex(1000)
+                    .transition(.move(edge: .bottom))
+            }
         }
         .sheet(isPresented: $menuState.isVacationModeMenuPresented) {
             VacationModeSelectionSheet(
@@ -63,6 +74,16 @@ struct ContentView: View {
             // 關閉任何開啟的 menu
             menuState.isMenuPresented = false
             menuState.isVacationModeMenuPresented = false
+        }
+        // 🔥 新增：長按手勢開啟 Firebase 測試
+        .onLongPressGesture(minimumDuration: 3.0) {
+            firebaseTestCount += 1
+            if firebaseTestCount >= 3 {
+                withAnimation(.easeInOut(duration: 0.5)) {
+                    showingFirebaseTest.toggle()
+                }
+                firebaseTestCount = 0
+            }
         }
     }
 }
@@ -145,6 +166,19 @@ struct TemplatesView: View {
         }
         .background(Color.black.ignoresSafeArea())
         .padding(.top, 45)
+    }
+}
+
+// 🔥 新增：搖晃手勢檢測
+extension UIDevice {
+    static let deviceDidShakeNotification = Notification.Name(rawValue: "deviceDidShakeNotification")
+}
+
+extension UIWindow {
+    open override func motionEnded(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
+        if motion == .motionShake {
+            NotificationCenter.default.post(name: UIDevice.deviceDidShakeNotification, object: nil)
+        }
     }
 }
 

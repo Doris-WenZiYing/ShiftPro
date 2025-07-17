@@ -1,0 +1,31 @@
+# Xcode
+DerivedData/
+build/
+*.xcworkspace
+!default.xcworkspace
+*.xcodeproj/project.xcworkspace/
+xcuserdata/
+*.xcuserstate
+
+# CocoaPods
+Pods/
+
+# Carthage
+Carthage/Build/
+
+# Swift Package Manager
+/.build/
+/Packages/
+
+# Firebase 私密設定
+GoogleService-Info.plist
+
+# SwiftUI Preview
+Preview\ Content/
+
+# MacOS
+.DS_Store
+
+# 快取
+*.swp
+*.lock
