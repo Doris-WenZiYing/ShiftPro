@@ -2,188 +2,182 @@
 //  VacationLimitsManager.swift
 //  ShiftPro
 //
-//  增強版休假限制管理器
+//  Created by Doris Wen on 2025/7/15.
 //
 
 import Foundation
+import FirebaseFirestore
 
 class VacationLimitsManager: ObservableObject {
     static let shared = VacationLimitsManager()
 
     private let userDefaults = UserDefaults.standard
-    private let limitsKey = "VacationLimits"
+    private let limitsKey    = "VacationLimits"
+    private let db           = Firestore.firestore()
+
+    /// 後端或預設的組織 ID（可由登入流程設定）
+    var orgId: String {
+        userDefaults.string(forKey: "orgId") ?? "demo_store_01"
+    }
 
     private init() {}
 
-    // MARK: - 保存休假限制
+    // MARK: - Local Storage
+
+    /// 將 VacationLimits 編碼後存到 UserDefaults
     func saveVacationLimits(_ limits: VacationLimits) -> Bool {
         do {
-            let encoded = try JSONEncoder().encode(limits)
-            let key = "\(limitsKey)_\(limits.year)_\(limits.month)"
-            userDefaults.set(encoded, forKey: key)
-
-            print("✅ 休假限制已保存: \(key)")
-            print("   類型: \(limits.vacationType.rawValue)")
-            print("   月限制: \(limits.monthlyLimit ?? 0)")
-            print("   週限制: \(limits.weeklyLimit ?? 0)")
-            print("   已發佈: \(limits.isPublished)")
-
+            let data = try JSONEncoder().encode(limits)
+            let key  = "\(limitsKey)_\(limits.month)"
+            userDefaults.set(data, forKey: key)
+            print("✅ 本地儲存休假限制：\(key)")
             return true
         } catch {
-            print("❌ 保存休假限制失敗: \(error)")
+            print("❌ 本地儲存失敗：\(error)")
             return false
         }
     }
 
-    // MARK: - 保存並發送通知
-    func saveVacationLimitsWithNotification(_ limits: VacationLimits) -> Bool {
-        let success = saveVacationLimits(limits)
-        if success {
-            // 發送通知給員工端
-            DispatchQueue.main.async {
-                NotificationCenter.default.post(
-                    name: .vacationLimitsDidUpdate,
-                    object: limits,
-                    userInfo: [
-                        "isNewPublication": limits.isPublished, // 🔥 修復：使用 limits.isPublished
-                        "vacationType": limits.vacationType.rawValue,
-                        "targetMonth": "\(limits.year)-\(String(format: "%02d", limits.month))"
-                    ]
-                )
-
-                print("📤 通知已發送給員工端")
-                print("   月份: \(limits.year)-\(String(format: "%02d", limits.month))")
-                print("   類型: \(limits.vacationType.rawValue)")
-                print("   是否為新發佈: \(limits.isPublished)")
-            }
-        }
-        return success
-    }
-
-    // MARK: - 獲取休假限制
+    /// 從 UserDefaults 取出 VacationLimits，若無則回傳預設
     func getVacationLimits(for year: Int, month: Int) -> VacationLimits {
-        let key = "\(limitsKey)_\(year)_\(month)"
+        let monthString = String(format: "%04d-%02d", year, month)
+        let key = "\(limitsKey)_\(monthString)"
 
         if let data = userDefaults.data(forKey: key),
            let limits = try? JSONDecoder().decode(VacationLimits.self, from: data) {
-
-            print("📖 讀取到休假限制: \(key)")
-            print("   類型: \(limits.vacationType.rawValue)")
-            print("   月限制: \(limits.monthlyLimit ?? 0)")
-            print("   週限制: \(limits.weeklyLimit ?? 0)")
-            print("   已發佈: \(limits.isPublished)")
-
             return limits
         }
 
-        // 返回默認值
-        print("🔄 使用默認休假限制: \(key)")
+        // 回傳未發布的預設
         return VacationLimits(
-            monthlyLimit: 8,
-            weeklyLimit: 2,
-            year: year,
-            month: month,
+            orgId: orgId,
+            month: monthString,
+            vacationType: VacationType.monthly.rawValue,
+            monthlyLimit: nil,
+            weeklyLimit: nil,
             isPublished: false,
-            vacationType: .monthly
+            publishedDate: nil
         )
     }
 
-    // MARK: - 檢查是否有設定
     func hasLimitsForMonth(year: Int, month: Int) -> Bool {
-        let key = "\(limitsKey)_\(year)_\(month)"
-        let hasData = userDefaults.data(forKey: key) != nil
-
-        if hasData {
-            // 進一步檢查是否已發佈
-            let limits = getVacationLimits(for: year, month: month)
-            print("🔍 檢查月份 \(year)-\(month) 的設定狀態: 已發佈=\(limits.isPublished)")
-            return limits.isPublished
-        }
-
-        print("🔍 檢查月份 \(year)-\(month): 無資料")
-        return false
+        getVacationLimits(for: year, month: month).isPublished
     }
 
-    // MARK: - 獲取所有已發佈的設定
-    func getAllPublishedLimits() -> [VacationLimits] {
-        var allLimits: [VacationLimits] = []
-
-        // 搜索所有相關的key
-        let allKeys = userDefaults.dictionaryRepresentation().keys
-        let limitsKeys = allKeys.filter { $0.hasPrefix(limitsKey) }
-
-        for key in limitsKeys {
-            if let data = userDefaults.data(forKey: key),
-               let limits = try? JSONDecoder().decode(VacationLimits.self, from: data),
-               limits.isPublished {
-                allLimits.append(limits)
-            }
-        }
-
-        // 按年月排序
-        return allLimits.sorted { first, second in
-            if first.year != second.year {
-                return first.year < second.year
-            }
-            return first.month < second.month
-        }
-    }
-
-    // MARK: - 刪除設定
     func deleteLimits(for year: Int, month: Int) -> Bool {
-        let key = "\(limitsKey)_\(year)_\(month)"
+        let monthString = String(format: "%04d-%02d", year, month)
+        let key = "\(limitsKey)_\(monthString)"
         userDefaults.removeObject(forKey: key)
 
-        print("🗑️ 已刪除休假限制: \(key)")
+        // 同步刪除 Firestore
+        db.collection("vacation_limits")
+          .document("\(orgId)_\(monthString)")
+          .delete() { error in
+            if let e = error {
+                print("❌ Firebase 刪除失敗：\(e)")
+            } else {
+                print("✅ Firebase 刪除成功：\(monthString)")
+            }
+          }
 
-        // 發送刪除通知
-        DispatchQueue.main.async {
-            NotificationCenter.default.post(
-                name: .vacationLimitsDidUpdate,
-                object: nil,
-                userInfo: [
-                    "isDeleted": true,
-                    "targetMonth": "\(year)-\(String(format: "%02d", month))"
-                ]
-            )
-        }
-
+        // 發送更新通知
+        NotificationCenter.default.post(
+            name: .vacationLimitsDidUpdate,
+            object: nil,
+            userInfo: ["targetMonth": monthString, "isDeleted": true]
+        )
         return true
     }
 
-    // MARK: - 清除所有設定
-    func clearAllLimits() {
-        let allKeys = userDefaults.dictionaryRepresentation().keys
-        let limitsKeys = allKeys.filter { $0.hasPrefix(limitsKey) }
+    // MARK: - Firebase Sync
 
-        for key in limitsKeys {
-            userDefaults.removeObject(forKey: key)
-        }
-
-        print("🧹 已清除所有休假限制")
-
-        // 發送清除通知
-        DispatchQueue.main.async {
-            NotificationCenter.default.post(
-                name: .vacationLimitsDidUpdate,
-                object: nil,
-                userInfo: ["isCleared": true]
-            )
-        }
+    /// 將本地或 Boss 設定同步到 Firestore
+    func syncToFirebase(_ limits: VacationLimits, completion: @escaping (Bool) -> Void) {
+        let key = "\(orgId)_\(limits.month)"
+        let data: [String: Any] = [
+            "orgId": limits.orgId,
+            "month": limits.month,
+            "vacationType": limits.vacationType,
+            "monthlyLimit": limits.monthlyLimit ?? 0,
+            "weeklyLimit": limits.weeklyLimit ?? 0,
+            "isPublished": limits.isPublished,
+            "publishedDate": limits.publishedDate ?? Date(),
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+        db.collection("vacation_limits")
+          .document(key)
+          .setData(data) { error in
+            if let e = error {
+                print("❌ Firebase 同步失敗：\(e)")
+                completion(false)
+            } else {
+                print("✅ Firebase 同步成功：\(key)")
+                completion(true)
+                // 通知 UI
+                NotificationCenter.default.post(
+                    name: .vacationLimitsDidUpdate,
+                    object: nil,
+                    userInfo: [
+                        "targetMonth": limits.month,
+                        "isNewPublication": limits.isPublished
+                    ]
+                )
+            }
+          }
     }
 
-    // MARK: - 調試方法
-    func printAllStoredLimits() {
-        print("\n📋 所有儲存的休假限制:")
-        let allLimits = getAllPublishedLimits()
-
-        if allLimits.isEmpty {
-            print("   (無)")
-        } else {
-            for limits in allLimits {
-                print("   \(limits.displayText)")
+    /// 從 Firestore 讀取單月設定（一次性），並更新本地快取
+    func loadVacationLimitsFromFirebase(
+        for year: Int,
+        month: Int,
+        completion: @escaping (VacationLimits?) -> Void
+    ) {
+        let monthString = String(format: "%04d-%02d", year, month)
+        let key = "\(orgId)_\(monthString)"
+        db.collection("vacation_limits")
+          .document(key)
+          .getDocument { snap, error in
+            guard
+              let data = snap?.data(),
+              error == nil,
+              let limits = self.parseFirebaseData(data, monthString: monthString)
+            else {
+              completion(nil)
+              return
             }
+            // 更新本地
+            _ = self.saveVacationLimits(limits)
+            completion(limits)
+          }
+    }
+
+    /// 解析 Firestore 回傳的 raw data
+    private func parseFirebaseData(
+        _ data: [String: Any],
+        monthString: String
+    ) -> VacationLimits? {
+        guard
+          let vType  = data["vacationType"] as? String,
+          let isPub  = data["isPublished"] as? Bool
+        else { return nil }
+
+        let mLimit = data["monthlyLimit"] as? Int
+        let wLimit = data["weeklyLimit"] as? Int
+        let pubDate: Date?
+        if let ts = data["publishedDate"] as? Timestamp {
+            pubDate = ts.dateValue()
+        } else {
+            pubDate = nil
         }
-        print("")
+
+        return VacationLimits(
+            orgId: orgId,
+            month: monthString,
+            vacationType: vType,
+            monthlyLimit: mLimit,
+            weeklyLimit: wLimit,
+            isPublished: isPub,
+            publishedDate: pubDate
+        )
     }
 }

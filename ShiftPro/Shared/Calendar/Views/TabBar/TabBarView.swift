@@ -18,7 +18,7 @@ struct TabBarView: View {
             tabItem("line.3.horizontal", label: "More", tab: .more)
         }
         .padding(.top, 5)
-        .padding(.bottom, hasHomeIndicator() ? 8 : 12) // 適應有 home indicator 的機型
+        .padding(.bottom, hasHomeIndicator() ? 8 : 12)
         .background(Color.black)
     }
 

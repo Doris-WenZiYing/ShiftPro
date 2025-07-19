@@ -10,8 +10,4 @@ import Foundation
 enum ShiftAction {
     case editVacation
     case clearVacation
-//    case dayShift
-//    case nightShift
-//    case addShift
-//    case shiftCycle
 }

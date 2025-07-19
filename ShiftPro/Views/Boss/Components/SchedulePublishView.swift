@@ -222,13 +222,8 @@ struct SchedulePublishView: View {
         let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
 
         return LazyVGrid(columns: columns, spacing: 4) {
-            ForEach(0..<42, id: \.self) { index in
-                if index < days.count {
-                    calendarCell(day: days[index])
-                } else {
-                    Color.clear
-                        .frame(height: 50)
-                }
+            ForEach(days) { day in
+                calendarCell(day: day)
             }
         }
     }
@@ -416,7 +411,7 @@ struct SchedulePublishView: View {
 
 #Preview {
     SchedulePublishView(
-        isPresented: .constant(true),
+        isPresented: Binding.constant(true),
         onPublish: { scheduleData in
             print("Published: \(scheduleData.displayText)")
         }

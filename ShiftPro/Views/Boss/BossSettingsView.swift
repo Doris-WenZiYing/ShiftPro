@@ -2,7 +2,7 @@
 //  BossSettingsView.swift
 //  ShiftPro
 //
-//  完全修復版本：自動關閉Sheet + 正確狀態同步
+//  Created by Doris Wen on 2025/7/11.
 //
 
 import SwiftUI
@@ -119,7 +119,7 @@ struct BossSettingsView: View {
 
             Button(action: { showingDatePicker = true }) {
                 HStack {
-                    Text(String(format: "%04d年%02d月", selectedYear, selectedMonth))
+                    Text("\(selectedYear.yearString)年\(String(format: "%02d", selectedMonth))月")
                         .font(.system(size: 24, weight: .bold))
                         .foregroundColor(.white)
 
@@ -329,7 +329,7 @@ struct BossSettingsView: View {
             }
 
             VStack(spacing: 12) {
-                previewRow("calendar.circle", "目標月份", String(format: "%04d年%02d月", selectedYear, selectedMonth))
+                previewRow("calendar.circle", "目標月份", "\(selectedYear.yearString)年\(String(format: "%02d", selectedMonth))月")
                 previewRow("calendar.badge.checkmark", "排休類型", vacationType.displayName)
 
                 if vacationType == .monthly {
@@ -407,11 +407,13 @@ struct BossSettingsView: View {
                         self.weeklyLimit = weeklyLimit
                     }
 
-                    self.vacationType = limits.vacationType
+                    if let vacationType = VacationType(rawValue: limits.vacationType) {
+                        self.vacationType = vacationType
+                    }
 
                 } else {
                     print("📱 Firebase 中無該月份設定，使用默認值")
-                    self.loadCurrentSettings()
+                    // 保持當前的預設值
                 }
             }
         }
@@ -420,46 +422,41 @@ struct BossSettingsView: View {
     func publishVacationSettings() {
         print("🚀 開始發佈排休設定到 Firebase...")
 
-        // 🔥 先測試 Firebase 連接
-        FirebaseDebugHelper.shared.testFirebaseConnection()
-
+        let monthString = String(format: "%04d-%02d", selectedYear, selectedMonth)
         let limits = VacationLimits(
+            orgId: VacationLimitsManager.shared.orgId,
+            month: monthString,
+            vacationType: vacationType.rawValue,
             monthlyLimit: vacationType == .monthly ? monthlyLimit : nil,
-            weeklyLimit: weeklyLimit,
-            year: selectedYear,
-            month: selectedMonth,
+            weeklyLimit: vacationType == .weekly ? weeklyLimit : nil,
             isPublished: true,
-            publishedDate: Date(),
-            vacationType: vacationType
+            publishedDate: Date()
         )
 
         print("📦 即將發佈到 Firebase 的設定:")
-        print("   月份: \(selectedYear)-\(selectedMonth)")
+        print("   月份: \(monthString)")
         print("   類型: \(vacationType.rawValue)")
         print("   月限制: \(limits.monthlyLimit ?? 0)")
         print("   週限制: \(limits.weeklyLimit ?? 0)")
         print("   已發佈: \(limits.isPublished)")
 
-        // 🔥 使用 Firebase 同步版本
-        let success = VacationLimitsManager.shared.saveVacationLimitsWithFirebaseSync(limits)
+        // 使用 VacationLimitsManager 發佈
+        VacationLimitsManager.shared.syncToFirebase(limits) { success in
+            DispatchQueue.main.async {
+                if success {
+                    // 同時保存到本地
+                    let _ = VacationLimitsManager.shared.saveVacationLimits(limits)
 
-        if success {
-            alertMessage = "排休設定已成功發佈到雲端！\n\n目標月份: \(String(format: "%04d年%02d月", selectedYear, selectedMonth))\n排休類型: \(vacationType.displayName)\n限制天數: \(vacationType == .monthly ? monthlyLimit : weeklyLimit) 天\n\n員工現在可以開始排休了！"
-            showingSuccessAlert = true
-            print("✅ 發佈成功！已同步到 Firebase")
+                    self.alertMessage = "排休設定已成功發佈到雲端！\n\n目標月份: \(self.selectedYear.yearString)年\(String(format: "%02d", self.selectedMonth))月\n排休類型: \(self.vacationType.displayName)\n限制天數: \(self.vacationType == .monthly ? self.monthlyLimit : self.weeklyLimit) 天\n\n員工現在可以開始排休了！"
+                    self.showingSuccessAlert = true
+                    print("✅ 發佈成功！已同步到 Firebase")
 
-            // 🔥 發佈成功後延遲關閉 Sheet
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                if self.showingSuccessAlert {
-                    self.showingSuccessAlert = false
-                    self.dismiss()
+                } else {
+                    self.alertMessage = "發佈失敗，請檢查網絡連接後重試"
+                    self.showingSuccessAlert = true
+                    print("❌ 發佈失敗！")
                 }
             }
-
-        } else {
-            alertMessage = "發佈失敗，請檢查網絡連接後重試"
-            showingSuccessAlert = true
-            print("❌ 發佈失敗！")
         }
     }
 }
@@ -488,7 +485,7 @@ struct BossDatePickerSheet: View {
 
                         Picker("年", selection: $selectedYear) {
                             ForEach(years, id: \.self) { year in
-                                Text("\(year)")
+                                Text(year.yearString)
                                     .font(.system(size: 20, weight: .medium))
                             }
                         }
