@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Network
 
 struct EmployeeCalendarView: View {
     // MARK: - Dependencies
@@ -169,6 +170,9 @@ struct EmployeeCalendarView: View {
 
                 Spacer()
 
+                // 🔥 添加同步狀態指示器
+                SyncStatusView()
+
                 if viewModel.isVacationEditMode {
                     Text("編輯中")
                         .font(.system(size: 14, weight: .medium))
@@ -190,10 +194,10 @@ struct EmployeeCalendarView: View {
                 )
 
                 statusBadge(
-                    title: "同步狀態",
-                    status: viewModel.isUsingBossSettings ? "已同步" : "等待中",
+                    title: "老闆設定",
+                    status: viewModel.isUsingBossSettings ? "已發佈" : "等待中",
                     color: viewModel.isUsingBossSettings ? .green : .gray,
-                    icon: viewModel.isUsingBossSettings ? "cloud.fill" : "cloud"
+                    icon: viewModel.isUsingBossSettings ? "checkmark.circle.fill" : "clock.circle"
                 )
             }
         }
