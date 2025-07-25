@@ -24,6 +24,9 @@ class BossCalendarViewModel: ObservableObject {
     private let storage: LocalStorageService
     private var cancellables = Set<AnyCancellable>()
 
+    // MARK: - 假資料配置
+    private let demoOrgId = "demo_store_01"
+
     // MARK: - Init
     init(
         scheduleService: ScheduleService = .shared,
@@ -32,23 +35,44 @@ class BossCalendarViewModel: ObservableObject {
         self.scheduleService = scheduleService
         self.storage = storage
 
-        // Initialize currentDisplayMonth
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM"
-        self.currentDisplayMonth = formatter.string(from: Date())
+        // Initialize currentDisplayMonth using extension
+        self.currentDisplayMonth = DateFormatter.yearMonthFormatter.string(from: Date())
+
+        // 設定假資料
+        setupDemoData()
 
         // load saved publish status
         loadPublishStatus()
+
+        // 🔥 監聽發佈通知
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("VacationRulePublished"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            if let month = notification.userInfo?["month"] as? String,
+               month == self?.currentDisplayMonth {
+                self?.isVacationPublished = true
+                self?.savePublishStatus()
+            }
+        }
     }
 
     deinit {
         cancellables.forEach { $0.cancel() }
     }
 
+    // MARK: - Demo Data Setup
+    private func setupDemoData() {
+        UserDefaults.standard.set(demoOrgId, forKey: "orgId")
+        print("🎭 Boss 使用假資料: orgId=\(demoOrgId)")
+    }
+
     // MARK: - Month
     func updateDisplayMonth(year: Int, month: Int) {
         let newM = String(format: "%04d-%02d", year, month)
         guard newM != currentDisplayMonth else { return }
+        print("📅 BossViewModel 更新月份: \(currentDisplayMonth) -> \(newM)")
         currentDisplayMonth = newM
         loadPublishStatus()
     }
@@ -56,7 +80,7 @@ class BossCalendarViewModel: ObservableObject {
     // MARK: - Publish Vacation
     func publishVacationSetting(_ setting: VacationSetting) {
         scheduleService.updateVacationRule(
-            orgId: orgId,
+            orgId: demoOrgId,
             month: currentDisplayMonth,
             type: setting.type.rawValue,
             monthlyLimit: setting.allowedDays,
@@ -66,31 +90,39 @@ class BossCalendarViewModel: ObservableObject {
         .sink { [weak self] completion in
             switch completion {
             case .failure:
-                self?.showToast("發佈失敗，請重試", type: .error)
+                DispatchQueue.main.async {
+                    self?.showToast("發佈失敗，請重試", type: .error)
+                }
             case .finished:
                 break
             }
         } receiveValue: { [weak self] in
-            self?.isVacationPublished = true
-            self?.savePublishStatus()
-            self?.showToast("發佈排休成功！", type: .success)
+            DispatchQueue.main.async {
+                self?.isVacationPublished = true
+                self?.savePublishStatus()
+                self?.showToast("發佈排休成功！", type: .success)
+            }
         }
         .store(in: &cancellables)
     }
 
     func unpublishVacation() {
-        scheduleService.deleteVacationRule(orgId: orgId, month: currentDisplayMonth)
+        scheduleService.deleteVacationRule(orgId: demoOrgId, month: currentDisplayMonth)
             .sink { [weak self] completion in
                 switch completion {
                 case .failure:
-                    self?.showToast("取消發佈失敗", type: .error)
+                    DispatchQueue.main.async {
+                        self?.showToast("取消發佈失敗", type: .error)
+                    }
                 case .finished:
                     break
                 }
             } receiveValue: { [weak self] in
-                self?.isVacationPublished = false
-                self?.savePublishStatus()
-                self?.showToast("取消發佈成功", type: .warning)
+                DispatchQueue.main.async {
+                    self?.isVacationPublished = false
+                    self?.savePublishStatus()
+                    self?.showToast("取消發佈成功", type: .warning)
+                }
             }
             .store(in: &cancellables)
     }
@@ -118,9 +150,11 @@ class BossCalendarViewModel: ObservableObject {
     /// 發佈班表
     func publishSchedule(_ scheduleData: ScheduleData) {
         // TODO: 實作班表發佈邏輯
-        // 這裡可以將班表資料同步到 Firebase
-        isSchedulePublished = true
-        showToast("班表發佈成功！", type: .success)
+        DispatchQueue.main.async {
+            self.isSchedulePublished = true
+            self.savePublishStatus()
+            self.showToast("班表發佈成功！", type: .success)
+        }
     }
 
     /// 處理老闆操作
@@ -148,9 +182,11 @@ class BossCalendarViewModel: ObservableObject {
 
     /// 取消發佈班表
     func unpublishSchedule() {
-        // TODO: 實作取消發佈班表邏輯
-        isSchedulePublished = false
-        showToast("班表已取消發佈", type: .warning)
+        DispatchQueue.main.async {
+            self.isSchedulePublished = false
+            self.savePublishStatus()
+            self.showToast("班表已取消發佈", type: .warning)
+        }
     }
 
     private func loadPublishStatus() {
@@ -161,11 +197,12 @@ class BossCalendarViewModel: ObservableObject {
             isSchedulePublished = status.schedulePublished
         } else {
             // fallback: check Firestore
-            scheduleService.fetchVacationRule(orgId: orgId, month: currentDisplayMonth)
+            scheduleService.fetchVacationRule(orgId: demoOrgId, month: currentDisplayMonth)
                 .replaceError(with: nil)
                 .sink { [weak self] rule in
                     DispatchQueue.main.async {
                         self?.isVacationPublished = (rule?.published ?? false)
+                        self?.savePublishStatus()
                     }
                 }
                 .store(in: &cancellables)
@@ -191,11 +228,6 @@ class BossCalendarViewModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + (type == .error ? 5 : 3)) {
             withAnimation { self.isToastShowing = false }
         }
-    }
-
-    // MARK: - Read from UserDefaults
-    private var orgId: String {
-        UserDefaults.standard.string(forKey: "orgId") ?? "demo_store_01"
     }
 }
 

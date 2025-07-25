@@ -59,6 +59,9 @@ struct BossCalendarView: View {
                 isPresented: $isDatePickerPresented,
                 controller: controller
             )
+            .onDisappear {
+                viewModel.updateDisplayMonth(year: selectedYear, month: selectedMonth)
+            }
         }
         .sheet(isPresented: $showingSettingsView) {
             BossSettingsView()
@@ -99,10 +102,6 @@ struct BossCalendarView: View {
                     calendarGridView(month: month, cellHeight: cellHeight)
                 }
             }
-            // 🔥 當月份變化時通知 ViewModel
-            .onAppear {
-                viewModel.updateDisplayMonth(year: month.year, month: month.month)
-            }
             .onChange(of: month.year) { _, newYear in
                 viewModel.updateDisplayMonth(year: newYear, month: month.month)
             }
@@ -130,7 +129,7 @@ struct BossCalendarView: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
 
-                        Text("\(String(month.year))年")
+                        Text("\(month.yearString)年")
                             .font(.system(size: 18, weight: .medium))
                             .foregroundColor(.white.opacity(0.9))
 
@@ -143,26 +142,23 @@ struct BossCalendarView: View {
                 Spacer()
             }
 
-            // 🔥 老闆端狀態顯示 - 基於當前顯示月份
-            let currentDisplayMonth = String(format: "%04d-%02d", month.year, month.month)
-            if currentDisplayMonth == viewModel.currentDisplayMonth {
-                HStack(spacing: 12) {
-                    // Vacation Status
-                    statusBadge(
-                        title: "排休狀態",
-                        status: viewModel.vacationStatusText,
-                        color: viewModel.vacationStatusColor,
-                        icon: viewModel.isVacationPublished ? "checkmark.circle.fill" : "clock.circle.fill"
-                    )
+            // 🔥 固定狀態顯示 - 始終顯示
+            HStack(spacing: 12) {
+                // Vacation Status
+                statusBadge(
+                    title: "排休狀態",
+                    status: viewModel.vacationStatusText,
+                    color: viewModel.vacationStatusColor,
+                    icon: viewModel.isVacationPublished ? "checkmark.circle.fill" : "clock.circle.fill"
+                )
 
-                    // Schedule Status
-                    statusBadge(
-                        title: "班表狀態",
-                        status: viewModel.scheduleStatusText,
-                        color: viewModel.scheduleStatusColor,
-                        icon: viewModel.isSchedulePublished ? "checkmark.circle.fill" : "clock.circle.fill"
-                    )
-                }
+                // Schedule Status
+                statusBadge(
+                    title: "班表狀態",
+                    status: viewModel.scheduleStatusText,
+                    color: viewModel.scheduleStatusColor,
+                    icon: viewModel.isSchedulePublished ? "checkmark.circle.fill" : "clock.circle.fill"
+                )
             }
         }
         .padding(.horizontal, 24)
@@ -259,7 +255,9 @@ struct BossCalendarView: View {
                 Spacer()
 
                 Button(action: {
-                    menuState.isMenuPresented.toggle()
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        menuState.isMenuPresented.toggle()
+                    }
                 }) {
                     Image(systemName: "line.3.horizontal")
                         .font(.system(size: 22, weight: .medium))
