@@ -38,7 +38,7 @@ struct BossCalendarView: View {
             editButtonOverlay()
                 .zIndex(2)
 
-            // 🔥 修復：載入指示器 - 檢查 viewModel 是否有此屬性
+            // 載入指示器
             if viewModel.isFirebaseLoading {
                 loadingOverlay()
                     .zIndex(3)
@@ -75,6 +75,7 @@ struct BossCalendarView: View {
                 visibleMonth = monthKey
             }
         }
+        // 🔥 保持你的自定義設定
         .sheet(isPresented: $showingSettingsView) {
             BossSettingsView()
         }
@@ -141,7 +142,7 @@ struct BossCalendarView: View {
         }
     }
 
-    // 🔥 優化：處理可見月份變化
+    // 處理可見月份變化
     private func handleVisibleMonthChange(month: CalendarMonth) {
         let monthKey = String(format: "%04d-%02d", month.year, month.month)
 
@@ -177,6 +178,7 @@ struct BossCalendarView: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
 
+                        // 🔥 修復年份顯示問題：直接使用 Int 轉 String
                         Text("\(month.year)年")
                             .font(.system(size: 18, weight: .medium))
                             .foregroundColor(.white.opacity(0.9))
@@ -189,7 +191,7 @@ struct BossCalendarView: View {
 
                 Spacer()
 
-                // 🔥 修復：處理中指示器 - 檢查屬性存在
+                // 處理中指示器
                 if viewModel.isFirebaseLoading {
                     HStack(spacing: 6) {
                         ProgressView()
@@ -207,7 +209,7 @@ struct BossCalendarView: View {
                 }
             }
 
-            // 🔥 優化：狀態顯示
+            // 狀態顯示
             HStack(spacing: 12) {
                 // Vacation Status - 使用真實 Firebase 狀態
                 statusBadge(
@@ -225,7 +227,7 @@ struct BossCalendarView: View {
                     icon: viewModel.isSchedulePublished ? "checkmark.circle.fill" : "clock.circle.fill"
                 )
 
-                // 🔥 優化：顯示更多資訊
+                // 顯示更多資訊
                 if let rule = viewModel.firebaseRule {
                     VStack(spacing: 2) {
                         Text("\(rule.monthlyLimit ?? 0)天")
@@ -250,7 +252,7 @@ struct BossCalendarView: View {
         .padding(.vertical, 20)
     }
 
-    // 🔥 修復：動態圖標 - 檢查屬性存在
+    // 動態圖標
     private func getVacationIcon() -> String {
         if viewModel.isFirebaseLoading {
             return "clock.arrow.circlepath"
@@ -414,7 +416,6 @@ struct BossCalendarView: View {
                     .clipShape(Capsule())
                     .shadow(color: .black.opacity(0.15), radius: 8, x: 0, y: 4)
                 }
-                // 🔥 修復：檢查屬性存在才 disable
                 .disabled(viewModel.isFirebaseLoading)
             }
             .padding(.bottom, 30)

@@ -21,8 +21,23 @@ class UserManager: ObservableObject {
     private let userDefaults = UserDefaults.standard
     private var cancellables = Set<AnyCancellable>()
 
+    // 🔥 修復：統一的員工ID計數器
+    private static var employeeIdCounter: Int {
+        get {
+            UserDefaults.standard.integer(forKey: "employeeIdCounter")
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "employeeIdCounter")
+        }
+    }
+
     private init() {
         loadUserFromLocal()
+
+        // 🔥 修復：初始化計數器
+        if Self.employeeIdCounter == 0 {
+            Self.employeeIdCounter = 1
+        }
     }
 
     // MARK: - User Profile Management
@@ -54,14 +69,24 @@ class UserManager: ObservableObject {
         print("👑 設定老闆身分: \(bossName) - 組織: \(orgName)")
     }
 
-    /// 設定當前用戶（員工）
+    /// 🔥 修復：設定當前用戶（員工）- 使用簡潔的ID
     func setCurrentEmployee(employeeId: String, employeeName: String, orgId: String, orgName: String) {
+        // 🔥 如果傳入的是亂碼ID，生成新的簡潔ID
+        let cleanEmployeeId: String
+        if employeeId.contains(".") || employeeId.count > 10 {
+            cleanEmployeeId = "emp_\(Self.employeeIdCounter)"
+            Self.employeeIdCounter += 1
+            print("🔧 轉換亂碼ID \(employeeId) -> \(cleanEmployeeId)")
+        } else {
+            cleanEmployeeId = employeeId
+        }
+
         let user = UserProfile(
-            id: employeeId,
+            id: cleanEmployeeId,
             name: employeeName,
             role: .employee,
             orgId: orgId,
-            employeeId: employeeId
+            employeeId: cleanEmployeeId
         )
 
         let org = OrganizationProfile(
@@ -78,7 +103,7 @@ class UserManager: ObservableObject {
 
         saveUserToLocal()
 
-        print("👤 設定員工身分: \(employeeName) - 組織: \(orgName)")
+        print("👤 設定員工身分: \(employeeName) - ID: \(cleanEmployeeId) - 組織: \(orgName)")
     }
 
     /// 切換身分（在同一組織內）
@@ -87,7 +112,8 @@ class UserManager: ObservableObject {
 
         if userRole == .boss {
             // 切換到員工
-            let employeeId = "emp_\(Date().timeIntervalSince1970)"
+            let employeeId = "emp_\(Self.employeeIdCounter)"
+            Self.employeeIdCounter += 1
             setCurrentEmployee(
                 employeeId: employeeId,
                 employeeName: user.name,
@@ -134,7 +160,7 @@ class UserManager: ObservableObject {
     }
 
     var currentEmployeeId: String {
-        currentUser?.employeeId ?? "emp_001"
+        currentUser?.employeeId ?? "emp_1"
     }
 
     var roleDisplayText: String {
@@ -172,7 +198,31 @@ class UserManager: ObservableObject {
         // 載入用戶資料
         if let userData = userDefaults.data(forKey: "CurrentUser"),
            let user = try? JSONDecoder().decode(UserProfile.self, from: userData) {
-            currentUser = user
+
+            // 🔥 修復：檢查並修復亂碼員工ID
+            if user.role == .employee,
+               let empId = user.employeeId,
+               (empId.contains(".") || empId.count > 10) {
+
+                let newEmployeeId = "emp_\(Self.employeeIdCounter)"
+                Self.employeeIdCounter += 1
+
+                let fixedUser = UserProfile(
+                    id: newEmployeeId,
+                    name: user.name,
+                    role: user.role,
+                    orgId: user.orgId,
+                    employeeId: newEmployeeId
+                )
+
+                currentUser = fixedUser
+                print("🔧 修復亂碼員工ID: \(empId) -> \(newEmployeeId)")
+
+                // 重新保存修復後的資料
+                saveUserToLocal()
+            } else {
+                currentUser = user
+            }
         }
 
         // 載入組織資料
@@ -190,7 +240,7 @@ class UserManager: ObservableObject {
         isLoggedIn = userDefaults.bool(forKey: "IsLoggedIn")
 
         if isLoggedIn {
-            print("📱 從本地載入用戶: \(displayName) (\(roleDisplayText))")
+            print("📱 從本地載入用戶: \(displayName) (\(roleDisplayText)) ID: \(currentEmployeeId)")
         }
     }
 }

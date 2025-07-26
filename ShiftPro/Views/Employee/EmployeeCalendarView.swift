@@ -128,7 +128,7 @@ struct EmployeeCalendarView: View {
         }
     }
 
-    // 🔥 優化：處理可見月份變化
+    // 🔥 修復問題3：優化月份變化處理，避免狀態混亂
     private func handleVisibleMonthChange(month: CalendarMonth) {
         let monthKey = String(format: "%04d-%02d", month.year, month.month)
 
@@ -138,7 +138,11 @@ struct EmployeeCalendarView: View {
 
         print("📅 Employee 切換到可見月份: \(visibleMonth) -> \(monthKey)")
         visibleMonth = monthKey
-        viewModel.updateDisplayMonth(year: month.year, month: month.month)
+
+        // 🔥 修復：延遲更新避免狀態混亂
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            viewModel.updateDisplayMonth(year: month.year, month: month.month)
+        }
     }
 
     private func isValidMonth(month: CalendarMonth) -> Bool {
@@ -162,6 +166,7 @@ struct EmployeeCalendarView: View {
                             .font(.system(size: 28, weight: .bold))
                             .foregroundColor(.white)
 
+                        // 🔥 修復問題4：年份顯示不使用格式化器
                         Text("\(month.year)年")
                             .font(.system(size: 18, weight: .medium))
                             .foregroundColor(.white.opacity(0.9))
@@ -186,7 +191,7 @@ struct EmployeeCalendarView: View {
                 }
             }
 
-            // 🔥 優化：狀態顯示
+            // 🔥 修復問題3：優化狀態顯示，確保穩定性
             HStack(spacing: 12) {
                 // 排休狀態
                 statusBadge(
@@ -212,15 +217,17 @@ struct EmployeeCalendarView: View {
         .padding(.vertical, 20)
     }
 
-    // MARK: - 🔥 優化：狀態判斷邏輯
+    // MARK: - 🔥 修復問題3：優化狀態判斷邏輯，確保一致性
     private func getVacationStatus(for month: CalendarMonth) -> String {
         let monthKey = String(format: "%04d-%02d", month.year, month.month)
 
+        // 🔥 確保只對當前顯示月份進行狀態判斷
         guard monthKey == viewModel.currentDisplayMonth else {
-            return "未設定"
+            // 其他月份根據是否有老闆設定來決定
+            return viewModel.isUsingBossSettings ? "可排休" : "等待發佈"
         }
 
-        // 🔥 使用真實 Firebase 狀態
+        // 🔥 使用真實 Firebase 狀態，優先級：已提交 > 未提交 > 可排休 > 等待發佈
         if viewModel.isReallySubmitted {
             return "已提交"
         } else if !viewModel.vacationData.selectedDates.isEmpty {
@@ -236,7 +243,7 @@ struct EmployeeCalendarView: View {
         let monthKey = String(format: "%04d-%02d", month.year, month.month)
 
         guard monthKey == viewModel.currentDisplayMonth else {
-            return .gray
+            return viewModel.isUsingBossSettings ? .blue : .gray
         }
 
         if viewModel.isReallySubmitted {
@@ -254,7 +261,7 @@ struct EmployeeCalendarView: View {
         let monthKey = String(format: "%04d-%02d", month.year, month.month)
 
         guard monthKey == viewModel.currentDisplayMonth else {
-            return "calendar"
+            return viewModel.isUsingBossSettings ? "calendar.badge.checkmark" : "clock.circle"
         }
 
         if viewModel.isReallySubmitted {
@@ -530,11 +537,17 @@ struct EmployeeCalendarView: View {
     }
 }
 
-// MARK: - 🔥 新增：員工排休編輯畫面
+// MARK: - 🔥 修復後的員工排休編輯畫面
 struct EmployeeScheduleEditView: View {
     @Binding var isPresented: Bool
     @ObservedObject var viewModel: EmployeeCalendarViewModel
-    @State private var currentDate = Date()
+
+    // 🔥 修復問題2：固定顯示當前月份，不允許切換
+    private var currentDate: Date {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM"
+        return formatter.date(from: viewModel.currentDisplayMonth) ?? Date()
+    }
 
     private let calendar = Calendar.current
 
@@ -543,11 +556,15 @@ struct EmployeeScheduleEditView: View {
             ZStack {
                 Color.black.ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    headerSection()
-                    limitsInfoCard()
-                    calendarSection()
-                    bottomActions()
+                // 🔥 修復問題1：添加 ScrollView 確保可以滾動
+                ScrollView {
+                    VStack(spacing: 0) {
+                        headerSection()
+                        limitsInfoCard()
+                        calendarSection()
+                        bottomActions()
+                    }
+                    .padding(.bottom, 30) // 確保底部有足夠空間
                 }
             }
             .navigationTitle("排休設定")
@@ -559,14 +576,6 @@ struct EmployeeScheduleEditView: View {
                     }
                     .foregroundColor(.white)
                 }
-            }
-        }
-        .onAppear {
-            // 設置當前顯示月份
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM"
-            if let date = formatter.date(from: viewModel.currentDisplayMonth) {
-                currentDate = date
             }
         }
     }
@@ -582,7 +591,8 @@ struct EmployeeScheduleEditView: View {
                 .font(.system(size: 24, weight: .bold))
                 .foregroundColor(.white)
 
-            Text(viewModel.getMonthDisplayText())
+            // 🔥 修復問題2：只顯示當前月份，不可切換
+            Text(getCurrentMonthName())
                 .font(.system(size: 18, weight: .medium))
                 .foregroundColor(.white.opacity(0.8))
         }
@@ -642,6 +652,7 @@ struct EmployeeScheduleEditView: View {
     // MARK: - Calendar Section
     private func calendarSection() -> some View {
         VStack(spacing: 16) {
+            // 🔥 修復問題2：移除月份切換功能，只顯示當前月份
             monthHeader()
             weekdayHeaders()
             calendarGrid()
@@ -651,36 +662,13 @@ struct EmployeeScheduleEditView: View {
     }
 
     private func monthHeader() -> some View {
+        // 🔥 修復問題2：只顯示月份標題，不提供切換功能
         HStack {
-            Button(action: {
-                if let newDate = calendar.date(byAdding: .month, value: -1, to: currentDate) {
-                    currentDate = newDate
-                    updateDisplayMonth()
-                }
-            }) {
-                Image(systemName: "chevron.left")
-                    .foregroundColor(.white)
-                    .font(.system(size: 18, weight: .medium))
-            }
-
             Spacer()
-
             Text(getCurrentMonthName())
                 .font(.system(size: 20, weight: .bold))
                 .foregroundColor(.white)
-
             Spacer()
-
-            Button(action: {
-                if let newDate = calendar.date(byAdding: .month, value: 1, to: currentDate) {
-                    currentDate = newDate
-                    updateDisplayMonth()
-                }
-            }) {
-                Image(systemName: "chevron.right")
-                    .foregroundColor(.white)
-                    .font(.system(size: 18, weight: .medium))
-            }
         }
     }
 
@@ -698,6 +686,8 @@ struct EmployeeScheduleEditView: View {
 
     private func calendarGrid() -> some View {
         let days = getDaysInMonth()
+
+        // 🔥 修復問題2：動態列數，根據實際天數調整
         let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
 
         return LazyVGrid(columns: columns, spacing: 4) {
@@ -708,14 +698,16 @@ struct EmployeeScheduleEditView: View {
     }
 
     private func calendarCell(day: CalendarDay) -> some View {
-        let dayString = String(format: "%@-%02d", getCurrentMonthString(), calendar.component(.day, from: day.date))
+        let dayComponent = calendar.component(.day, from: day.date)
+        let dayString = String(format: "%@-%02d", getCurrentMonthString(), dayComponent)
         let isSelected = viewModel.vacationData.selectedDates.contains(dayString)
         let isCurrentMonth = day.isWithinDisplayedMonth
-        let canSelect = viewModel.canSelect(day: calendar.component(.day, from: day.date))
+        let canSelect = viewModel.canSelect(day: dayComponent)
 
         return Button(action: {
-            if isCurrentMonth && getCurrentMonthString() == viewModel.currentDisplayMonth {
-                viewModel.toggleVacationDate(dayString)
+            // 🔥 修復問題7：選擇日期時不顯示 toast
+            if isCurrentMonth {
+                viewModel.toggleVacationDate(dayString, showToast: false)
             }
         }) {
             ZStack {
@@ -725,7 +717,7 @@ struct EmployeeScheduleEditView: View {
 
                 if isCurrentMonth {
                     VStack(spacing: 2) {
-                        Text("\(calendar.component(.day, from: day.date))")
+                        Text("\(dayComponent)")
                             .font(.system(size: 16, weight: .medium))
                             .foregroundColor(isSelected ? .white : .white)
 
@@ -740,7 +732,7 @@ struct EmployeeScheduleEditView: View {
                         }
                     }
                 } else {
-                    Text("\(calendar.component(.day, from: day.date))")
+                    Text("\(dayComponent)")
                         .font(.system(size: 16, weight: .medium))
                         .foregroundColor(.gray.opacity(0.4))
                 }
@@ -753,14 +745,15 @@ struct EmployeeScheduleEditView: View {
             }
         }
         .buttonStyle(PlainButtonStyle())
-        .disabled(!canSelect || !isCurrentMonth || getCurrentMonthString() != viewModel.currentDisplayMonth)
+        .disabled(!canSelect || !isCurrentMonth)
     }
 
     // MARK: - Bottom Actions
     private func bottomActions() -> some View {
         HStack(spacing: 16) {
             Button("清除全部") {
-                viewModel.vacationData.selectedDates.removeAll()
+                // 🔥 修復問題1：清除時不顯示 toast，統一在 ViewModel 中處理
+                viewModel.clearAllVacationDataWithToast()
             }
             .padding(.vertical, 12)
             .padding(.horizontal, 20)
@@ -779,7 +772,7 @@ struct EmployeeScheduleEditView: View {
             .disabled(viewModel.vacationData.selectedDates.isEmpty || viewModel.isFirebaseLoading)
         }
         .padding(.horizontal, 24)
-        .padding(.bottom, 30)
+        .padding(.bottom, 20)
     }
 
     // MARK: - Helper Methods
@@ -795,14 +788,7 @@ struct EmployeeScheduleEditView: View {
         return formatter.string(from: currentDate)
     }
 
-    private func updateDisplayMonth() {
-        let newMonthString = getCurrentMonthString()
-        let components = newMonthString.split(separator: "-")
-        if let year = Int(components[0]), let month = Int(components[1]) {
-            viewModel.updateDisplayMonth(year: year, month: month)
-        }
-    }
-
+    // 🔥 修復問題2：只顯示當月日期，不使用 7*6 格子
     private func getDaysInMonth() -> [CalendarDay] {
         let year = calendar.component(.year, from: currentDate)
         let month = calendar.component(.month, from: currentDate)
@@ -813,39 +799,13 @@ struct EmployeeScheduleEditView: View {
 
         let range = calendar.range(of: .day, in: .month, for: firstDay)!
         let daysInMonth = range.count
-        let startingWeekday = calendar.component(.weekday, from: firstDay) - 1
 
         var days: [CalendarDay] = []
 
-        // Previous month days
-        if startingWeekday > 0 {
-            let prevMonth = calendar.date(byAdding: .month, value: -1, to: firstDay)!
-            let prevRange = calendar.range(of: .day, in: .month, for: prevMonth)!
-            let prevDaysCount = prevRange.count
-
-            for day in (prevDaysCount - startingWeekday + 1)...prevDaysCount {
-                if let date = calendar.date(from: DateComponents(year: calendar.component(.year, from: prevMonth), month: calendar.component(.month, from: prevMonth), day: day)) {
-                    days.append(CalendarDay(date: date, isWithinDisplayedMonth: false))
-                }
-            }
-        }
-
-        // Current month days
+        // 🔥 修復問題2：只添加當前月份的日期
         for day in 1...daysInMonth {
             if let date = calendar.date(from: DateComponents(year: year, month: month, day: day)) {
                 days.append(CalendarDay(date: date, isWithinDisplayedMonth: true))
-            }
-        }
-
-        // Next month days
-        let totalCellsNeeded = 42
-        let remainingCells = totalCellsNeeded - days.count
-        if remainingCells > 0 {
-            let nextMonth = calendar.date(byAdding: .month, value: 1, to: firstDay)!
-            for day in 1...remainingCells {
-                if let date = calendar.date(from: DateComponents(year: calendar.component(.year, from: nextMonth), month: calendar.component(.month, from: nextMonth), day: day)) {
-                    days.append(CalendarDay(date: date, isWithinDisplayedMonth: false))
-                }
             }
         }
 

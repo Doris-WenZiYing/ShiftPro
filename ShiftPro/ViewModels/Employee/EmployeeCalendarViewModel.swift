@@ -33,6 +33,13 @@ class EmployeeCalendarViewModel: ObservableObject {
     private let userManager = UserManager.shared
     private var cancellables = Set<AnyCancellable>()
 
+    // MARK: - 🔥 修復數據丟失：每月獨立的數據管理
+    private var monthlyVacationData: [String: VacationData] = [:]
+    private var hasShownInitialToast: Set<String> = []
+    private var hasShownPublishToast: Set<String> = []
+    private var lastToastTime: Date = Date.distantPast
+    private let toastCooldownInterval: TimeInterval = 2.0
+
     // MARK: - 🔥 優化：智能快取與狀態管理
     private var firebaseListeners: [String: AnyCancellable] = [:]
     private var dataCache: [String: CachedEmployeeData] = [:]
@@ -79,6 +86,9 @@ class EmployeeCalendarViewModel: ObservableObject {
 
         setupUserManager()
 
+        // 🔥 修復：載入所有月份的本地數據
+        loadAllMonthlyData()
+
         // 延遲初始化避免啟動時過載
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             self.isInitialized = true
@@ -93,11 +103,56 @@ class EmployeeCalendarViewModel: ObservableObject {
         cancellables.forEach { $0.cancel() }
     }
 
+    // MARK: - 🔥 修復數據丟失：載入所有月份數據
+    private func loadAllMonthlyData() {
+        // 載入最近6個月的數據
+        let calendar = Calendar.current
+        let currentDate = Date()
+
+        for offset in -3...3 {
+            if let targetDate = calendar.date(byAdding: .month, value: offset, to: currentDate) {
+                let formatter = DateFormatter()
+                formatter.dateFormat = "yyyy-MM"
+                let monthKey = formatter.string(from: targetDate)
+
+                if let localData = storage.loadVacationData(month: monthKey) {
+                    monthlyVacationData[monthKey] = localData
+                    print("📱 載入 \(monthKey) 本地數據: \(localData.selectedDates.count) 天")
+                }
+            }
+        }
+    }
+
+    // MARK: - 🔥 修復數據丟失：保存所有月份數據
+    private func saveMonthlyData(_ data: VacationData, for month: String) {
+        monthlyVacationData[month] = data
+        storage.saveVacationData(data, month: month)
+        print("💾 保存 \(month) 數據: \(data.selectedDates.count) 天")
+    }
+
+    // MARK: - 🔥 修復數據丟失：獲取特定月份數據
+    private func getVacationData(for month: String) -> VacationData {
+        if let data = monthlyVacationData[month] {
+            return data
+        }
+
+        // 嘗試從本地載入
+        if let localData = storage.loadVacationData(month: month) {
+            monthlyVacationData[month] = localData
+            return localData
+        }
+
+        // 創建新的空數據
+        let newData = VacationData()
+        monthlyVacationData[month] = newData
+        return newData
+    }
+
     // MARK: - 🔥 優化：用戶管理設置
     private func setupUserManager() {
         if !userManager.isLoggedIn {
             userManager.setCurrentEmployee(
-                employeeId: "emp_001",
+                employeeId: "emp_1",
                 employeeName: "測試員工",
                 orgId: "demo_store_01",
                 orgName: "Demo Store"
@@ -120,12 +175,18 @@ class EmployeeCalendarViewModel: ObservableObject {
         }
     }
 
-    // MARK: - 🔥 優化：月份更新
+    // MARK: - 🔥 修復：月份更新時保持數據獨立性
     func updateDisplayMonth(year: Int, month: Int) {
         guard isInitialized else { return }
 
         let newMonth = String(format: "%04d-%02d", year, month)
         guard isValidMonth(year: year, month: month) else { return }
+
+        // 🔥 修復：保存當前月份數據
+        if currentDisplayMonth != newMonth {
+            saveMonthlyData(vacationData, for: currentDisplayMonth)
+        }
+
         guard newMonth != currentDisplayMonth else { return }
 
         print("📅 Employee 更新月份: \(currentDisplayMonth) -> \(newMonth)")
@@ -134,6 +195,14 @@ class EmployeeCalendarViewModel: ObservableObject {
         removeFirebaseListener(for: currentDisplayMonth)
 
         currentDisplayMonth = newMonth
+
+        // 🔥 修復：載入新月份的獨立數據
+        vacationData = getVacationData(for: newMonth)
+
+        // 重置 Toast 狀態
+        hasShownInitialToast.remove(newMonth)
+        hasShownPublishToast.remove(newMonth)
+
         loadCurrentMonthData()
     }
 
@@ -151,27 +220,17 @@ class EmployeeCalendarViewModel: ObservableObject {
             return
         }
 
-        // 2. 載入本地資料
-        loadLocalData()
+        // 2. 確保載入當前月份的數據
+        vacationData = getVacationData(for: currentDisplayMonth)
 
         // 3. 設置 Firebase 監聽
         setupFirebaseListeners()
-    }
-
-    private func loadLocalData() {
-        if let local = storage.loadVacationData(month: currentDisplayMonth) {
-            vacationData = local
-            print("📱 Employee 載入本地資料: \(currentDisplayMonth)")
-        } else {
-            vacationData = VacationData()
-        }
     }
 
     // MARK: - 🔥 修復：Firebase 實時監聽
     private func setupFirebaseListeners() {
         let listenerId = currentDisplayMonth
 
-        // 🔥 修復：正確的 Publishers.CombineLatest 使用
         let rulePublisher = scheduleService.fetchVacationRule(orgId: currentOrgId, month: currentDisplayMonth)
             .replaceError(with: nil)
 
@@ -205,20 +264,22 @@ class EmployeeCalendarViewModel: ObservableObject {
             let wasUsingBossSettings = isUsingBossSettings
             isUsingBossSettings = r.published
 
-            // 只在真正變化時顯示通知
-            if r.published && !wasUsingBossSettings {
+            // 只在真正變化且未顯示過時顯示通知
+            if r.published && !wasUsingBossSettings && !hasShownPublishToast.contains(currentDisplayMonth) {
                 showToast("老闆發佈了 \(getMonthDisplayText()) 的排休設定！", type: .success)
+                hasShownPublishToast.insert(currentDisplayMonth)
             }
         } else {
             isUsingBossSettings = false
         }
     }
 
+    // 🔥 修復數據丟失：處理 Firebase 排班更新時保持數據獨立性
     private func handleScheduleUpdate(_ schedule: FirestoreEmployeeSchedule?) {
         firebaseSchedule = schedule
 
-        if let s = schedule {
-            // 🔥 關鍵：以 Firebase 資料為準
+        if let s = schedule, s.month == currentDisplayMonth {
+            // 🔥 關鍵修復：只更新當前顯示月份的數據
             var newData = VacationData()
             newData.selectedDates = Set(s.selectedDates)
             newData.isSubmitted = s.isSubmitted
@@ -228,8 +289,8 @@ class EmployeeCalendarViewModel: ObservableObject {
             if vacationData.selectedDates != newData.selectedDates ||
                vacationData.isSubmitted != newData.isSubmitted {
                 vacationData = newData
-                storage.saveVacationData(newData, month: currentDisplayMonth)
-                print("📊 Employee Firebase 排班更新: \(s.selectedDates.count)天, 提交=\(s.isSubmitted)")
+                saveMonthlyData(newData, for: currentDisplayMonth)
+                print("📊 Employee Firebase 排班更新: \(currentDisplayMonth) - \(s.selectedDates.count)天, 提交=\(s.isSubmitted)")
             }
         }
     }
@@ -267,6 +328,8 @@ class EmployeeCalendarViewModel: ObservableObject {
         dataCache.removeAll()
         firebaseRule = nil
         firebaseSchedule = nil
+        hasShownInitialToast.removeAll()
+        hasShownPublishToast.removeAll()
     }
 
     // MARK: - 🔥 優化：Firebase 監聽管理
@@ -288,16 +351,16 @@ class EmployeeCalendarViewModel: ObservableObject {
         case .editVacation:
             guard canEditVacation else {
                 if !isUsingBossSettings {
-                    showToast("等待老闆發佈 \(getMonthDisplayText()) 的排休設定", type: .info)
+                    showToastWithCooldown("等待老闆發佈 \(getMonthDisplayText()) 的排休設定", type: .info)
                 } else if isReallySubmitted {
-                    showToast("本月排休已提交，無法修改", type: .error)
+                    showToastWithCooldown("本月排休已提交，無法修改", type: .error)
                 } else {
-                    showToast("無法編輯此月份", type: .error)
+                    showToastWithCooldown("無法編輯此月份", type: .error)
                 }
                 return
             }
 
-            // 🔥 新增：進入排休編輯模式
+            // 進入排休編輯模式
             isSubmissionMode = true
 
         case .clearVacation:
@@ -322,7 +385,7 @@ class EmployeeCalendarViewModel: ObservableObject {
         print("📝 Employee 提交排休...")
 
         guard !vacationData.selectedDates.isEmpty else {
-            showToast("請先選擇排休日期", type: .error)
+            showToastWithCooldown("請先選擇排休日期", type: .error)
             return
         }
 
@@ -330,7 +393,7 @@ class EmployeeCalendarViewModel: ObservableObject {
         if currentVacationMode != .monthly {
             let stats = WeekUtils.weeklyStats(for: vacationData.selectedDates, in: currentDisplayMonth)
             if stats.values.contains(where: { $0 > weeklyVacationLimit }) {
-                showToast("請檢查週休限制，每週最多可排 \(weeklyVacationLimit) 天", type: .error)
+                showToastWithCooldown("請檢查週休限制，每週最多可排 \(weeklyVacationLimit) 天", type: .error)
                 return
             }
         }
@@ -366,7 +429,7 @@ class EmployeeCalendarViewModel: ObservableObject {
                     case .failure(let error):
                         print("❌ Employee 提交失敗: \(error)")
                         SyncStatusManager.shared.setSyncError()
-                        self?.showToast("提交失敗，請重試", type: .error)
+                        self?.showToastWithCooldown("提交失敗，請重試", type: .error)
                     case .finished:
                         break
                     }
@@ -376,7 +439,15 @@ class EmployeeCalendarViewModel: ObservableObject {
                 DispatchQueue.main.async {
                     print("✅ Employee 提交成功！")
                     SyncStatusManager.shared.setSyncSuccess()
-                    self?.showToast("排休已成功提交！", type: .success)
+                    self?.showToastWithCooldown("排休已成功提交！", type: .success)
+
+                    // 🔥 修復：提交成功後更新當前月份數據狀態
+                    if let self = self {
+                        var updatedData = self.vacationData
+                        updatedData.isSubmitted = true
+                        self.vacationData = updatedData
+                        self.saveMonthlyData(updatedData, for: self.currentDisplayMonth)
+                    }
 
                     // 退出編輯模式
                     self?.exitEditMode()
@@ -399,8 +470,9 @@ class EmployeeCalendarViewModel: ObservableObject {
         SyncStatusManager.shared.setSyncing()
 
         // 1. 清除本地資料
-        vacationData = VacationData()
-        storage.clearVacationData(month: currentDisplayMonth)
+        let emptyData = VacationData()
+        vacationData = emptyData
+        saveMonthlyData(emptyData, for: currentDisplayMonth)
 
         // 2. 清除快取
         dataCache.removeValue(forKey: currentDisplayMonth)
@@ -408,7 +480,6 @@ class EmployeeCalendarViewModel: ObservableObject {
         // 3. 刪除 Firebase 資料
         let docId = "\(currentOrgId)_\(currentEmployeeId)_\(currentDisplayMonth)"
 
-        // 🔥 修復：正確的 Firebase Service 使用
         let firebaseService = FirebaseService.shared
         firebaseService.deleteDocument(
             collection: "employee_schedules",
@@ -422,7 +493,7 @@ class EmployeeCalendarViewModel: ObservableObject {
                     case .failure(let error):
                         print("❌ Employee 清除失敗: \(error)")
                         SyncStatusManager.shared.setSyncError()
-                        self?.showToast("清除失敗，請重試", type: .error)
+                        self?.showToastWithCooldown("清除失敗，請重試", type: .error)
                     case .finished:
                         break
                     }
@@ -432,7 +503,7 @@ class EmployeeCalendarViewModel: ObservableObject {
                 DispatchQueue.main.async {
                     print("✅ Employee Firebase 資料已清除")
                     SyncStatusManager.shared.setSyncSuccess()
-                    self?.showToast("排休資料已完全清除", type: .info)
+                    self?.showToastWithCooldown("排休資料已完全清除", type: .info)
 
                     // 重置狀態
                     self?.firebaseSchedule = nil
@@ -443,10 +514,20 @@ class EmployeeCalendarViewModel: ObservableObject {
         .store(in: &cancellables)
     }
 
+    // MARK: - 新增帶 Toast 的清除方法
+    func clearAllVacationDataWithToast() {
+        let emptyData = VacationData()
+        vacationData = emptyData
+        saveMonthlyData(emptyData, for: currentDisplayMonth)
+        showToastWithCooldown("已清除所有選擇", type: .info)
+    }
+
     // MARK: - 🔥 優化：日期選擇邏輯
-    func toggleVacationDate(_ dateString: String) {
+    func toggleVacationDate(_ dateString: String, showToast: Bool = false) {
         guard canEditVacation else {
-            showToast("無法編輯排休", type: .error)
+            if showToast {
+                showToastWithCooldown("無法編輯排休", type: .error)
+            }
             return
         }
 
@@ -454,13 +535,13 @@ class EmployeeCalendarViewModel: ObservableObject {
 
         if data.selectedDates.contains(dateString) {
             data.selectedDates.remove(dateString)
-            apply(data, message: "已取消排休", type: .info)
+            apply(data, message: nil, type: .info)
             return
         }
 
         // 月上限檢查
         if data.selectedDates.count >= availableVacationDays {
-            showToast("已達到本月可排休上限 \(availableVacationDays) 天", type: .error)
+            showToastWithCooldown("已達到本月可排休上限 \(availableVacationDays) 天", type: .error)
             return
         }
 
@@ -469,13 +550,13 @@ class EmployeeCalendarViewModel: ObservableObject {
             let week = WeekUtils.weekIndex(of: dateString, in: currentDisplayMonth)
             let used = WeekUtils.count(in: data.selectedDates, week: week)
             if used >= weeklyVacationLimit {
-                showToast("已超過第\(week)週最多可排 \(weeklyVacationLimit) 天", type: .weeklyLimit)
+                showToastWithCooldown("已超過第\(week)週最多可排 \(weeklyVacationLimit) 天", type: .weeklyLimit)
                 return
             }
         }
 
         data.selectedDates.insert(dateString)
-        apply(data, successDate: dateString)
+        apply(data, successDate: nil)
     }
 
     func canSelect(day: Int) -> Bool {
@@ -531,6 +612,7 @@ class EmployeeCalendarViewModel: ObservableObject {
         return currentDisplayMonth > currentMonth
     }
 
+    // MARK: - Toast 控制方法
     func showToast(_ msg: String, type: ToastType) {
         toastMessage = msg
         toastType = type
@@ -542,6 +624,17 @@ class EmployeeCalendarViewModel: ObservableObject {
         }
     }
 
+    private func showToastWithCooldown(_ msg: String, type: ToastType) {
+        let now = Date()
+        guard now.timeIntervalSince(lastToastTime) >= toastCooldownInterval else {
+            print("🔇 Toast 冷卻中，跳過顯示: \(msg)")
+            return
+        }
+
+        lastToastTime = now
+        showToast(msg, type: type)
+    }
+
     // MARK: - Private Methods
     private func apply(
         _ data: VacationData,
@@ -550,10 +643,10 @@ class EmployeeCalendarViewModel: ObservableObject {
         successDate: String? = nil
     ) {
         vacationData = data
-        storage.saveVacationData(data, month: currentDisplayMonth)
+        saveMonthlyData(data, for: currentDisplayMonth)
 
         if let msg = message {
-            showToast(msg, type: type)
+            showToastWithCooldown(msg, type: type)
         }
 
         if let dateString = successDate {
@@ -568,13 +661,13 @@ class EmployeeCalendarViewModel: ObservableObject {
             let week = WeekUtils.weekIndex(of: dateString, in: currentDisplayMonth)
             let used = WeekUtils.count(in: vacationData.selectedDates, week: week)
             let weekRemaining = weeklyVacationLimit - used
-            showToast("排休成功！剩餘 \(remaining) 天，週剩餘 \(weekRemaining) 天", type: .weeklySuccess)
+            showToastWithCooldown("排休成功！剩餘 \(remaining) 天，週剩餘 \(weekRemaining) 天", type: .weeklySuccess)
         } else {
-            showToast("排休成功！剩餘 \(remaining) 天", type: .success)
+            showToastWithCooldown("排休成功！剩餘 \(remaining) 天", type: .success)
         }
     }
 
-    // MARK: - 🔥 新增：通知監聽
+    // MARK: - 通知監聽
     private func setupNotificationListeners() {
         NotificationCenter.default.addObserver(
             forName: Notification.Name("VacationRulePublished"),
@@ -586,7 +679,7 @@ class EmployeeCalendarViewModel: ObservableObject {
                orgId == self?.currentOrgId,
                month == self?.currentDisplayMonth {
                 print("📢 Employee 收到發佈通知")
-                self?.setupFirebaseListeners() // 重新設置監聽
+                self?.setupFirebaseListeners()
             }
         }
 
@@ -601,7 +694,7 @@ class EmployeeCalendarViewModel: ObservableObject {
                month == self?.currentDisplayMonth {
                 print("📢 Employee 收到取消發佈通知")
                 self?.isUsingBossSettings = false
-                self?.showToast("老闆已取消發佈排休設定", type: .warning)
+                self?.showToastWithCooldown("老闆已取消發佈排休設定", type: .warning)
             }
         }
     }

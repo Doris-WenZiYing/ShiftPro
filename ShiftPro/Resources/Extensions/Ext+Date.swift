@@ -33,11 +33,11 @@ extension DateFormatter {
     }
 }
 
-// 🔥 修復：移除有問題的 yearString 擴展，改用簡單的字串轉換
+// 🔥 修復問題4：完全移除格式化器，直接使用字串轉換
 extension CalendarMonth {
-    /// 獲取年份字串（無千位分隔符）- 修復版本
+    /// 🔥 修復：獲取年份字串（無千位分隔符）- 直接轉換版本
     var yearString: String {
-        return String(self.year) // 直接轉換，不使用格式化器
+        return String(self.year) // 直接轉換，確保無逗號
     }
 
     /// 獲取完整的年月顯示字串
