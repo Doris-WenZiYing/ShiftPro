@@ -119,7 +119,8 @@ struct BossSettingsView: View {
 
             Button(action: { showingDatePicker = true }) {
                 HStack {
-                    Text("\(selectedYear.yearString)年\(String(format: "%02d", selectedMonth))月")
+                    // 🔥 修復：直接使用 String(selectedYear) 而不是 .yearString
+                    Text("\(String(selectedYear))年\(String(format: "%02d", selectedMonth))月")
                         .font(.system(size: 24, weight: .bold))
                         .foregroundColor(.white)
 
@@ -329,7 +330,8 @@ struct BossSettingsView: View {
             }
 
             VStack(spacing: 12) {
-                previewRow("calendar.circle", "目標月份", "\(selectedYear.yearString)年\(String(format: "%02d", selectedMonth))月")
+                // 🔥 修復：直接使用 String(selectedYear) 而不是 .yearString
+                previewRow("calendar.circle", "目標月份", "\(String(selectedYear))年\(String(format: "%02d", selectedMonth))月")
                 previewRow("calendar.badge.checkmark", "排休類型", vacationType.displayName)
 
                 if vacationType == .monthly {
@@ -447,9 +449,19 @@ struct BossSettingsView: View {
                     // 同時保存到本地
                     let _ = VacationLimitsManager.shared.saveVacationLimits(limits)
 
-                    self.alertMessage = "排休設定已成功發佈到雲端！\n\n目標月份: \(self.selectedYear.yearString)年\(String(format: "%02d", self.selectedMonth))月\n排休類型: \(self.vacationType.displayName)\n限制天數: \(self.vacationType == .monthly ? self.monthlyLimit : self.weeklyLimit) 天\n\n員工現在可以開始排休了！"
+                    // 🔥 修復：直接使用 String(selectedYear) 而不是 .yearString
+                    self.alertMessage = "排休設定已成功發佈到雲端！\n\n目標月份: \(String(self.selectedYear))年\(String(format: "%02d", self.selectedMonth))月\n排休類型: \(self.vacationType.displayName)\n限制天數: \(self.vacationType == .monthly ? self.monthlyLimit : self.weeklyLimit) 天\n\n員工現在可以開始排休了！"
                     self.showingSuccessAlert = true
                     print("✅ 發佈成功！已同步到 Firebase")
+
+                    // 🔥 新增：發送通知給 BossCalendarView
+                    NotificationCenter.default.post(
+                        name: Notification.Name("BossSettingsPublished"),
+                        object: nil,
+                        userInfo: [
+                            "month": String(format: "%04d-%02d", self.selectedYear, self.selectedMonth)
+                        ]
+                    )
 
                 } else {
                     self.alertMessage = "發佈失敗，請檢查網絡連接後重試"
@@ -485,8 +497,10 @@ struct BossDatePickerSheet: View {
 
                         Picker("年", selection: $selectedYear) {
                             ForEach(years, id: \.self) { year in
-                                Text(year.yearString)
+                                // 🔥 修復：直接使用 String(year) 而不是 .yearString
+                                Text(String(year))
                                     .font(.system(size: 20, weight: .medium))
+                                    .tag(year)
                             }
                         }
                         .pickerStyle(WheelPickerStyle())
@@ -502,6 +516,7 @@ struct BossDatePickerSheet: View {
                             ForEach(months, id: \.self) { month in
                                 Text("\(month)")
                                     .font(.system(size: 20, weight: .medium))
+                                    .tag(month)
                             }
                         }
                         .pickerStyle(WheelPickerStyle())

@@ -33,20 +33,15 @@ extension DateFormatter {
     }
 }
 
-extension Int {
-    /// 將年份整數格式化為字串 (確保沒有千位分隔符)
-    var yearString: String {
-        let formatter = NumberFormatter()
-        formatter.groupingSeparator = ""
-        formatter.numberStyle = .none
-        formatter.usesGroupingSeparator = false
-        return formatter.string(from: NSNumber(value: self)) ?? String(self)
-    }
-}
-
+// 🔥 修復：移除有問題的 yearString 擴展，改用簡單的字串轉換
 extension CalendarMonth {
-    /// 獲取年份字串（無千位分隔符）
+    /// 獲取年份字串（無千位分隔符）- 修復版本
     var yearString: String {
-        return year.yearString
+        return String(self.year) // 直接轉換，不使用格式化器
+    }
+
+    /// 獲取完整的年月顯示字串
+    var displayString: String {
+        return "\(String(self.year))年\(String(format: "%02d", self.month))月"
     }
 }

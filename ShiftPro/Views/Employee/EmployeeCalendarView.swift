@@ -21,7 +21,7 @@ struct EmployeeCalendarView: View {
     @State private var selectedYear = Calendar.current.component(.year, from: Date())
     @State private var selectedMonth = Calendar.current.component(.month, from: Date())
 
-    // 🚨 新增：只追蹤用戶實際看到的月份
+    // 🔥 優化：只追蹤用戶實際看到的月份
     @State private var visibleMonth: String = ""
     @State private var isCalendarReady = false
 
@@ -66,31 +66,40 @@ struct EmployeeCalendarView: View {
             )
             .onDisappear {
                 let monthKey = String(format: "%04d-%02d", selectedYear, selectedMonth)
-                print("📅 用戶手動選擇月份: \(monthKey)")
-                viewModel.safeUpdateDisplayMonth(year: selectedYear, month: selectedMonth)
+                print("📅 Employee 用戶手動選擇月份: \(monthKey)")
+                viewModel.updateDisplayMonth(year: selectedYear, month: selectedMonth)
                 visibleMonth = monthKey
             }
         }
         .onAppear {
-            // 只初始化一次
-            if !isCalendarReady {
-                let now = Date()
-                let y = Calendar.current.component(.year, from: now)
-                let m = Calendar.current.component(.month, from: now)
-                let monthKey = String(format: "%04d-%02d", y, m)
-
-                visibleMonth = monthKey
-                viewModel.safeUpdateDisplayMonth(year: y, month: m)
-                isCalendarReady = true
-
-                print("📱 初始化日曆視圖: \(monthKey)")
-            }
+            setupCalendar()
         }
-        .onChange(of: viewModel.currentVacationMode) {
-            menuState.currentVacationMode = viewModel.currentVacationMode
+        .onChange(of: viewModel.currentVacationMode) { _, newMode in
+            menuState.currentVacationMode = newMode
         }
-        .onChange(of: menuState.currentVacationMode) {
-            viewModel.currentVacationMode = menuState.currentVacationMode
+        .onChange(of: menuState.currentVacationMode) { _, newMode in
+            viewModel.currentVacationMode = newMode
+        }
+        .onChange(of: menuState.isMenuPresented) { _, newValue in
+            print("📱 Employee MenuState 變化: \(newValue)")
+        }
+    }
+
+    // MARK: - Setup
+    private func setupCalendar() {
+        // 只初始化一次
+        if !isCalendarReady {
+            let now = Date()
+            let y = Calendar.current.component(.year, from: now)
+            let m = Calendar.current.component(.month, from: now)
+            let monthKey = String(format: "%04d-%02d", y, m)
+
+            visibleMonth = monthKey
+            viewModel.updateDisplayMonth(year: y, month: m)
+            isCalendarReady = true
+
+            print("📱 Employee 初始化日曆視圖: \(monthKey)")
+            print("📱 Employee MenuState 初始狀態: \(menuState.isMenuPresented)")
         }
     }
 
@@ -108,38 +117,38 @@ struct EmployeeCalendarView: View {
                     calendarGridView(month: month, cellHeight: cellHeight)
                 }
             }
-            // 🚨 關鍵修復：只監聽真正顯示在屏幕上的月份
             .onAppear {
                 handleVisibleMonthChange(month: month)
             }
-            // 🚨 移除 onChange 監聽器，因為它們會在日曆庫初始化時大量觸發
         }
     }
 
-    // 🚨 新增：只處理真正可見的月份變化
+    // 🔥 優化：只處理真正可見的月份變化
     private func handleVisibleMonthChange(month: CalendarMonth) {
         let monthKey = String(format: "%04d-%02d", month.year, month.month)
 
         // 只處理用戶真正可見的月份
         guard isCalendarReady else {
+            print("📅 Employee 日曆尚未準備就緒，跳過: \(monthKey)")
             return
         }
 
         // 防止處理相同月份
         guard monthKey != visibleMonth else {
+            print("📅 Employee 月份相同，跳過: \(monthKey)")
             return
         }
 
-        // 只處理合理的年份範圍（當前年份 ±1）
+        // 🔥 修復：更嚴格的年份檢查
         let currentYear = Calendar.current.component(.year, from: Date())
-        guard abs(month.year - currentYear) <= 1 else {
-            print("🚫 忽略不合理年份: \(month.year)")
+        guard month.year >= currentYear - 1 && month.year <= currentYear + 2 else {
+            print("🚫 Employee 忽略不合理年份: \(month.year) (當前: \(currentYear))")
             return
         }
 
-        print("📅 用戶切換到可見月份: \(visibleMonth) -> \(monthKey)")
+        print("📅 Employee 用戶切換到可見月份: \(visibleMonth) -> \(monthKey)")
         visibleMonth = monthKey
-        viewModel.safeUpdateDisplayMonth(year: month.year, month: month.month)
+        viewModel.updateDisplayMonth(year: month.year, month: month.month)
     }
 
     // MARK: - Month Title View
@@ -158,7 +167,7 @@ struct EmployeeCalendarView: View {
                             .font(.system(size: 28, weight: .bold))
                             .foregroundColor(.white)
 
-                        Text("\(month.yearString)年")
+                        Text("\(month.year)年") // 🔥 修復：直接使用 month.year
                             .font(.system(size: 18, weight: .medium))
                             .foregroundColor(.white.opacity(0.9))
 
@@ -169,9 +178,6 @@ struct EmployeeCalendarView: View {
                 }
 
                 Spacer()
-
-                // 🔥 添加同步狀態指示器
-                SyncStatusView()
 
                 if viewModel.isVacationEditMode {
                     Text("編輯中")
@@ -184,7 +190,7 @@ struct EmployeeCalendarView: View {
                 }
             }
 
-            // 狀態顯示
+            // 🔥 優化：狀態顯示佈局
             HStack(spacing: 12) {
                 statusBadge(
                     title: "排休狀態",
@@ -199,6 +205,9 @@ struct EmployeeCalendarView: View {
                     color: viewModel.isUsingBossSettings ? .green : .gray,
                     icon: viewModel.isUsingBossSettings ? "checkmark.circle.fill" : "clock.circle"
                 )
+
+                // 🔥 同步狀態與其他狀態對齊
+                SyncStatusView()
             }
         }
         .padding(.horizontal, 24)
@@ -373,29 +382,17 @@ struct EmployeeCalendarView: View {
     private func topBar() -> some View {
         VStack {
             HStack {
-                // 緊急重置按鈕
-                Button("重置") {
-                    isCalendarReady = false
-                    visibleMonth = ""
-                    viewModel.emergencyReset()
-
-                    // 延遲重新初始化
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        isCalendarReady = true
-                    }
-                }
-                .font(.system(size: 12))
-                .foregroundColor(.red)
-                .opacity(0.6)
-
                 Spacer()
 
                 Button {
-                    print("🔘 Menu button tapped")
+                    print("🔘 Employee Menu button tapped")
+                    print("🔘 Menu 當前狀態: \(menuState.isMenuPresented)")
+
                     withAnimation(.easeInOut(duration: 0.3)) {
                         menuState.isMenuPresented.toggle()
                     }
-                    print("🔘 Menu state after toggle: \(menuState.isMenuPresented)")
+
+                    print("🔘 Menu 新狀態: \(menuState.isMenuPresented)")
                 } label: {
                     Image(systemName: "line.3.horizontal")
                         .font(.system(size: 22))

@@ -26,7 +26,7 @@ enum SyncStatus {
     var icon: String {
         switch self {
         case .connected: return "cloud.fill"
-        case .disconnected: return "cloud.slash"
+        case .disconnected: return "icloud.slash"
         case .syncing: return "cloud.bolt"
         case .error: return "exclamationmark.triangle.fill"
         }
@@ -51,6 +51,10 @@ class SyncStatusManager: ObservableObject {
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "NetworkMonitor")
 
+    // 🔥 優化：防止過度更新
+    private var lastStatusUpdate: Date = Date.distantPast
+    private let minUpdateInterval: TimeInterval = 1.0 // 最少1秒間隔
+
     private init() {
         startNetworkMonitoring()
     }
@@ -59,27 +63,40 @@ class SyncStatusManager: ObservableObject {
         monitor.pathUpdateHandler = { [weak self] path in
             DispatchQueue.main.async {
                 if path.status == .satisfied {
-                    self?.currentStatus = .connected
-                    self?.lastSyncTime = Date()
+                    self?.updateStatus(.connected)
                 } else {
-                    self?.currentStatus = .disconnected
+                    self?.updateStatus(.disconnected)
                 }
             }
         }
         monitor.start(queue: queue)
     }
 
+    // 🔥 優化：控制更新頻率
+    private func updateStatus(_ newStatus: SyncStatus) {
+        let now = Date()
+        guard now.timeIntervalSince(lastStatusUpdate) >= minUpdateInterval else {
+            return
+        }
+
+        currentStatus = newStatus
+        if newStatus == .connected {
+            lastSyncTime = now
+        }
+        lastStatusUpdate = now
+    }
+
     func setSyncing() {
-        currentStatus = .syncing
+        updateStatus(.syncing)
     }
 
     func setSyncSuccess() {
-        currentStatus = .connected
+        updateStatus(.connected)
         lastSyncTime = Date()
     }
 
     func setSyncError() {
-        currentStatus = .error
+        updateStatus(.error)
     }
 }
 
@@ -98,7 +115,7 @@ struct SyncStatusView: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(syncManager.currentStatus.color)
 
-            // 最後同步時間
+            // 🔥 優化：最後同步時間顯示
             if let lastSync = syncManager.lastSyncTime {
                 Text("• \(formatSyncTime(lastSync))")
                     .font(.system(size: 10))
@@ -115,12 +132,15 @@ struct SyncStatusView: View {
         )
     }
 
+    // 🔥 優化：更精確的時間格式化
     private func formatSyncTime(_ date: Date) -> String {
         let now = Date()
         let interval = now.timeIntervalSince(date)
 
-        if interval < 60 {
+        if interval < 10 {
             return "剛剛"
+        } else if interval < 60 {
+            return "\(Int(interval))秒前"
         } else if interval < 3600 {
             return "\(Int(interval / 60))分鐘前"
         } else if interval < 86400 {
@@ -133,26 +153,9 @@ struct SyncStatusView: View {
     }
 }
 
-// MARK: - SyncStatusManager 在 ViewModel 中的使用示例
-// 注意：實際的同步狀態管理應該在各自的 ViewModel 內部實現
-
 #Preview {
     VStack(spacing: 20) {
         SyncStatusView()
-
-        // 不同狀態的預覽
-        HStack(spacing: 6) {
-            Image(systemName: "cloud.bolt")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.blue)
-            Text("同步中")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.blue)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(Color.blue.opacity(0.1))
-        .cornerRadius(12)
     }
     .padding()
     .background(Color.black)

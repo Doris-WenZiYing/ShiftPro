@@ -28,8 +28,6 @@ class BossCalendarViewModel: ObservableObject {
     // MARK: - 🔥 優化：控制月份切換
     private var isInitialized = false
     private var lastValidatedMonth: String = ""
-    private var pendingMonthUpdates = Set<String>()
-    private var updateThrottleTimer: Timer?
 
     // MARK: - Real Data Properties
     private var currentOrgId: String {
@@ -44,11 +42,15 @@ class BossCalendarViewModel: ObservableObject {
         self.scheduleService = scheduleService
         self.storage = storage
 
-        // Initialize currentDisplayMonth using extension
-        self.currentDisplayMonth = DateFormatter.yearMonthFormatter.string(from: Date())
+        // 🔥 修復：使用正確的日期格式初始化
+        let now = Date()
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM"
+        self.currentDisplayMonth = formatter.string(from: now)
         self.lastValidatedMonth = self.currentDisplayMonth
 
         print("👑 Boss 初始化 - 組織: \(currentOrgId)")
+        print("   - 初始月份: \(currentDisplayMonth)")
 
         // 如果沒有登入，設定預設身分
         if !userManager.isLoggedIn {
@@ -87,7 +89,6 @@ class BossCalendarViewModel: ObservableObject {
 
     deinit {
         cancellables.forEach { $0.cancel() }
-        updateThrottleTimer?.invalidate()
     }
 
     // MARK: - Setup Default Boss
@@ -104,47 +105,45 @@ class BossCalendarViewModel: ObservableObject {
     func updateDisplayMonth(year: Int, month: Int) {
         let newMonth = String(format: "%04d-%02d", year, month)
 
-        // 🔥 防護 1：忽略無效的年份
+        // 🔥 修復：更嚴格的年份檢查，避免奇怪的年份
         let currentYear = Calendar.current.component(.year, from: Date())
-        if abs(year - currentYear) > 5 {
-            print("🚫 Boss 忽略無效年份: \(year)")
+        if year < currentYear - 1 || year > currentYear + 2 {
+            print("🚫 Boss 忽略無效年份: \(year) (當前: \(currentYear))")
+            return
+        }
+
+        if month < 1 || month > 12 {
+            print("🚫 Boss 忽略無效月份: \(month)")
             return
         }
 
         // 🔥 防護 2：檢查是否為有意義的變化
         guard newMonth != currentDisplayMonth else {
+            print("📅 Boss 月份相同，跳過: \(newMonth)")
             return
         }
 
         // 🔥 防護 3：等待初始化完成
         guard isInitialized else {
             print("⏳ Boss 等待初始化完成: \(newMonth)")
+            // 🔥 修復：初始化期間也要更新月份
+            currentDisplayMonth = newMonth
+            lastValidatedMonth = newMonth
             return
         }
 
-        // 🔥 防護 4：節流控制，避免快速連續更新
-        pendingMonthUpdates.insert(newMonth)
-        updateThrottleTimer?.invalidate()
-        updateThrottleTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
-            self?.processPendingMonthUpdates()
-        }
+        // 🔥 立即更新月份，不使用節流
+        print("📅 Boss 立即更新月份: \(currentDisplayMonth) -> \(newMonth)")
+        currentDisplayMonth = newMonth
+        lastValidatedMonth = newMonth
+
+        // 立即載入狀態
+        loadPublishStatus()
     }
 
     private func processPendingMonthUpdates() {
-        guard let latestMonth = pendingMonthUpdates.max() else { return }
-        pendingMonthUpdates.removeAll()
-
-        // 只處理最新的月份變化
-        guard latestMonth != currentDisplayMonth else { return }
-
-        print("📅 Boss 處理月份變化: \(currentDisplayMonth) -> \(latestMonth)")
-        currentDisplayMonth = latestMonth
-        lastValidatedMonth = latestMonth
-
-        // 只有合理的月份才載入狀態
-        if isReasonableMonth(latestMonth) {
-            loadPublishStatus()
-        }
+        // 🔥 移除節流邏輯，直接處理月份更新
+        // 此方法已不再需要，因為改為立即更新
     }
 
     // 🔥 新增：檢查月份是否合理
@@ -157,13 +156,18 @@ class BossCalendarViewModel: ObservableObject {
         }
 
         let currentYear = Calendar.current.component(.year, from: Date())
-        let currentMonth = Calendar.current.component(.month, from: Date())
 
         // 只允許當前年份前後2年的範圍
-        guard abs(year - currentYear) <= 2 else { return false }
+        guard year >= currentYear - 1 && year <= currentYear + 2 else {
+            print("🚫 Boss 年份超出範圍: \(year)")
+            return false
+        }
 
         // 月份必須在1-12之間
-        guard month >= 1 && month <= 12 else { return false }
+        guard month >= 1 && month <= 12 else {
+            print("🚫 Boss 月份超出範圍: \(month)")
+            return false
+        }
 
         return true
     }
@@ -215,9 +219,18 @@ class BossCalendarViewModel: ObservableObject {
                         "month": self?.currentDisplayMonth ?? ""
                     ]
                 )
+
+                // 🔥 強制重新載入當前月份狀態
+                self?.forceReloadCurrentMonth()
             }
         }
         .store(in: &cancellables)
+    }
+
+    // 🔥 新增：強制重新載入當前月份狀態
+    func forceReloadCurrentMonth() {
+        print("🔄 Boss 強制重新載入當前月份狀態: \(currentDisplayMonth)")
+        loadFromFirebase()
     }
 
     func unpublishVacation() {
@@ -231,7 +244,7 @@ class BossCalendarViewModel: ObservableObject {
                 switch completion {
                 case .failure(let error):
                     DispatchQueue.main.async {
-                        print("❌ 取消發佈失敗: \(error)")
+                        print("❌ Boss 取消發佈失敗: \(error)")
                         SyncStatusManager.shared.setSyncError()
                         self?.showToast("取消發佈失敗", type: .error)
                     }
@@ -240,7 +253,7 @@ class BossCalendarViewModel: ObservableObject {
                 }
             } receiveValue: { [weak self] in
                 DispatchQueue.main.async {
-                    print("✅ 取消發佈成功")
+                    print("✅ Boss 取消發佈成功")
                     SyncStatusManager.shared.setSyncSuccess()
                     self?.isVacationPublished = false
                     self?.savePublishStatus()
@@ -339,24 +352,14 @@ class BossCalendarViewModel: ObservableObject {
             isVacationPublished = status.vacationPublished
             isSchedulePublished = status.schedulePublished
             print("📱 Boss 載入本地狀態: 排休=\(isVacationPublished), 班表=\(isSchedulePublished)")
-        } else {
-            // fallback: check Firestore (但要避免過於頻繁)
-            loadFromFirebaseWithThrottle()
         }
+
+        // 🔥 總是從 Firebase 檢查最新狀態
+        loadFromFirebase()
     }
 
-    // 🔥 新增：節流的 Firebase 查詢
-    private var lastFirebaseQuery: Date = Date.distantPast
-    private func loadFromFirebaseWithThrottle() {
-        let now = Date()
-
-        // 限制 Firebase 查詢頻率（每3秒最多一次）
-        guard now.timeIntervalSince(lastFirebaseQuery) >= 3.0 else {
-            print("🚫 Boss Firebase 查詢過於頻繁，跳過")
-            return
-        }
-
-        lastFirebaseQuery = now
+    // 🔥 從 Firebase 載入發佈狀態
+    private func loadFromFirebase() {
         print("🔍 Boss 從 Firebase 檢查發佈狀態: \(currentDisplayMonth)")
 
         scheduleService.fetchVacationRule(orgId: currentOrgId, month: currentDisplayMonth)
