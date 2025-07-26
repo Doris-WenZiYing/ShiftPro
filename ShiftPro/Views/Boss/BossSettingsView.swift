@@ -6,9 +6,10 @@
 //
 
 import SwiftUI
+import Combine
 
 struct BossSettingsView: View {
-    // MARK: - Properties
+    // MARK: - State Properties
     @State private var monthlyLimit: Int = 8
     @State private var weeklyLimit: Int = 2
     @State private var vacationType: VacationType = .monthly
@@ -17,9 +18,17 @@ struct BossSettingsView: View {
     @State private var showingSuccessAlert = false
     @State private var showingDatePicker = false
     @State private var alertMessage = ""
+    @State private var isLoading = false
+    @State private var showingUnpublishAlert = false
 
-    // 🔥 新增：用於關閉 Sheet 的 Binding
+    // 🔥 新增：Firebase 狀態追蹤
+    @State private var currentFirebaseRule: FirestoreVacationRule?
+    @State private var hasExistingRule = false
+    @State private var isPublished = false
+
     @Environment(\.dismiss) private var dismiss
+    private let scheduleService = ScheduleService.shared
+    private let userManager = UserManager.shared
 
     var body: some View {
         ZStack {
@@ -31,9 +40,21 @@ struct BossSettingsView: View {
                 ScrollView {
                     VStack(spacing: 24) {
                         dateSelectionCard()
+
+                        // 🔥 新增：現有設定狀態卡片
+                        if hasExistingRule {
+                            existingRuleCard()
+                        }
+
                         vacationTypeCard()
                         limitsSettingCard()
                         currentSettingsPreview()
+
+                        // 🔥 優化：動態按鈕
+                        if hasExistingRule && isPublished {
+                            unpublishButton()
+                        }
+
                         publishButton()
                     }
                     .padding(.horizontal, 24)
@@ -52,11 +73,18 @@ struct BossSettingsView: View {
         }
         .alert("發佈完成", isPresented: $showingSuccessAlert) {
             Button("確定") {
-                // 🔥 點擊確定後關閉 Sheet
                 dismiss()
             }
         } message: {
             Text(alertMessage)
+        }
+        .alert("取消發佈", isPresented: $showingUnpublishAlert) {
+            Button("取消", role: .cancel) { }
+            Button("確認取消發佈", role: .destructive) {
+                unpublishVacationSettings()
+            }
+        } message: {
+            Text("確定要取消發佈排休設定嗎？這將清除該月份的所有設定。")
         }
         .sheet(isPresented: $showingDatePicker) {
             BossDatePickerSheet(
@@ -65,6 +93,11 @@ struct BossSettingsView: View {
                 isPresented: $showingDatePicker
             )
         }
+        .overlay {
+            if isLoading {
+                loadingOverlay()
+            }
+        }
     }
 
     // MARK: - Header View
@@ -72,7 +105,7 @@ struct BossSettingsView: View {
         VStack(spacing: 12) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("休假設定發佈")
+                    Text("休假設定管理")
                         .font(.system(size: 28, weight: .bold))
                         .foregroundColor(.white)
 
@@ -119,7 +152,6 @@ struct BossSettingsView: View {
 
             Button(action: { showingDatePicker = true }) {
                 HStack {
-                    // 🔥 修復：直接使用 String(selectedYear) 而不是 .yearString
                     Text("\(String(selectedYear))年\(String(format: "%02d", selectedMonth))月")
                         .font(.system(size: 24, weight: .bold))
                         .foregroundColor(.white)
@@ -143,6 +175,71 @@ struct BossSettingsView: View {
         .padding(20)
         .background(Color.white.opacity(0.05))
         .cornerRadius(16)
+    }
+
+    // MARK: - 🔥 新增：現有規則卡片
+    private func existingRuleCard() -> some View {
+        VStack(spacing: 16) {
+            HStack {
+                Image(systemName: isPublished ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundColor(isPublished ? .green : .orange)
+
+                Text("當前設定狀態")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.white)
+
+                Spacer()
+
+                Text(isPublished ? "已發佈" : "已設定未發佈")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(isPublished ? .green : .orange)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background((isPublished ? Color.green : Color.orange).opacity(0.2))
+                    .cornerRadius(12)
+            }
+
+            if let rule = currentFirebaseRule {
+                VStack(spacing: 8) {
+                    existingRuleRow("排休類型", VacationType(rawValue: rule.type)?.displayName ?? "未知")
+
+                    if let monthlyLimit = rule.monthlyLimit {
+                        existingRuleRow("月休限制", "\(monthlyLimit) 天")
+                    }
+
+                    if let weeklyLimit = rule.weeklyLimit {
+                        existingRuleRow("週休限制", "\(weeklyLimit) 天")
+                    }
+
+                    existingRuleRow("發佈狀態", rule.published ? "已發佈給員工" : "尚未發佈")
+                }
+                .padding(16)
+                .background(Color.white.opacity(0.05))
+                .cornerRadius(12)
+            }
+        }
+        .padding(20)
+        .background((isPublished ? Color.green : Color.orange).opacity(0.1))
+        .cornerRadius(16)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke((isPublished ? Color.green : Color.orange).opacity(0.3), lineWidth: 1)
+        )
+    }
+
+    private func existingRuleRow(_ title: String, _ value: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 14))
+                .foregroundColor(.white.opacity(0.8))
+
+            Spacer()
+
+            Text(value)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.white)
+        }
     }
 
     // MARK: - Vacation Type Card
@@ -330,7 +427,6 @@ struct BossSettingsView: View {
             }
 
             VStack(spacing: 12) {
-                // 🔥 修復：直接使用 String(selectedYear) 而不是 .yearString
                 previewRow("calendar.circle", "目標月份", "\(String(selectedYear))年\(String(format: "%02d", selectedMonth))月")
                 previewRow("calendar.badge.checkmark", "排休類型", vacationType.displayName)
 
@@ -368,14 +464,48 @@ struct BossSettingsView: View {
         }
     }
 
+    // MARK: - 🔥 新增：取消發佈按鈕
+    private func unpublishButton() -> some View {
+        Button(action: {
+            showingUnpublishAlert = true
+        }) {
+            HStack(spacing: 12) {
+                Image(systemName: "minus.circle.fill")
+                    .font(.system(size: 18, weight: .semibold))
+
+                Text("取消發佈設定")
+                    .font(.system(size: 18, weight: .semibold))
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 18)
+            .background(
+                LinearGradient(
+                    gradient: Gradient(colors: [Color.red, Color.red.opacity(0.8)]),
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .cornerRadius(16)
+            .shadow(color: .red.opacity(0.4), radius: 12, x: 0, y: 6)
+        }
+        .disabled(isLoading)
+    }
+
     // MARK: - Publish Button
     private func publishButton() -> some View {
         Button(action: publishVacationSettings) {
             HStack(spacing: 12) {
-                Image(systemName: "paperplane.fill")
-                    .font(.system(size: 18, weight: .semibold))
+                if isLoading {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .scaleEffect(0.8)
+                } else {
+                    Image(systemName: hasExistingRule ? "arrow.clockwise" : "paperplane.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                }
 
-                Text("發佈排休設定")
+                Text(hasExistingRule ? "更新並發佈設定" : "發佈排休設定")
                     .font(.system(size: 18, weight: .semibold))
             }
             .foregroundColor(.white)
@@ -391,89 +521,197 @@ struct BossSettingsView: View {
             .cornerRadius(16)
             .shadow(color: .blue.opacity(0.4), radius: 12, x: 0, y: 6)
         }
+        .disabled(isLoading)
     }
 
-    // MARK: - Helper Methods
-    private func loadCurrentSettings() {
-        print("🔍 從 Firebase 載入當前設定...")
+    // MARK: - Loading Overlay
+    private func loadingOverlay() -> some View {
+        ZStack {
+            Color.black.opacity(0.5)
+                .ignoresSafeArea()
 
-        VacationLimitsManager.shared.loadVacationLimitsFromFirebase(for: selectedYear, month: selectedMonth) { limits in
-            DispatchQueue.main.async {
-                if let limits = limits {
-                    print("✅ 從 Firebase 載入設定成功")
+            VStack(spacing: 16) {
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    .scaleEffect(1.2)
 
-                    if let monthlyLimit = limits.monthlyLimit {
-                        self.monthlyLimit = monthlyLimit
-                    }
-                    if let weeklyLimit = limits.weeklyLimit {
-                        self.weeklyLimit = weeklyLimit
-                    }
-
-                    if let vacationType = VacationType(rawValue: limits.vacationType) {
-                        self.vacationType = vacationType
-                    }
-
-                } else {
-                    print("📱 Firebase 中無該月份設定，使用默認值")
-                    // 保持當前的預設值
-                }
+                Text("處理中...")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.white)
             }
+            .padding(24)
+            .background(Color.black.opacity(0.8))
+            .cornerRadius(16)
         }
     }
 
+    // MARK: - 🔥 優化：載入當前設定
+    private func loadCurrentSettings() {
+        print("🔍 Boss Settings 載入當前設定...")
+
+        isLoading = true
+
+        scheduleService.fetchVacationRule(
+            orgId: userManager.currentOrgId,
+            month: String(format: "%04d-%02d", selectedYear, selectedMonth)
+        )
+        .sink(
+            receiveCompletion: { [self] completion in
+                DispatchQueue.main.async {
+                    self.isLoading = false
+                    switch completion {
+                    case .failure(let error):
+                        print("❌ 載入設定失敗: \(error)")
+                    case .finished:
+                        break
+                    }
+                }
+            },
+            receiveValue: { [self] rule in
+                DispatchQueue.main.async {
+                    if let rule = rule {
+                        print("✅ 載入到現有設定")
+                        self.currentFirebaseRule = rule
+                        self.hasExistingRule = true
+                        self.isPublished = rule.published
+
+                        // 載入設定值
+                        if let monthlyLimit = rule.monthlyLimit {
+                            self.monthlyLimit = monthlyLimit
+                        }
+                        if let weeklyLimit = rule.weeklyLimit {
+                            self.weeklyLimit = weeklyLimit
+                        }
+                        if let vacationType = VacationType(rawValue: rule.type) {
+                            self.vacationType = vacationType
+                        }
+                    } else {
+                        print("📱 該月份無現有設定")
+                        self.currentFirebaseRule = nil
+                        self.hasExistingRule = false
+                        self.isPublished = false
+                    }
+                }
+            }
+        )
+        .store(in: &cancellables)
+    }
+
+    // MARK: - 🔥 優化：發佈排休設定
     func publishVacationSettings() {
-        print("🚀 開始發佈排休設定到 Firebase...")
+        print("🚀 Boss Settings 發佈排休設定...")
+
+        isLoading = true
 
         let monthString = String(format: "%04d-%02d", selectedYear, selectedMonth)
-        let limits = VacationLimits(
-            orgId: VacationLimitsManager.shared.orgId,
+
+        scheduleService.updateVacationRule(
+            orgId: userManager.currentOrgId,
             month: monthString,
-            vacationType: vacationType.rawValue,
+            type: vacationType.rawValue,
             monthlyLimit: vacationType == .monthly ? monthlyLimit : nil,
             weeklyLimit: vacationType == .weekly ? weeklyLimit : nil,
-            isPublished: true,
-            publishedDate: Date()
+            published: true
         )
+        .sink(
+            receiveCompletion: { [self] completion in
+                DispatchQueue.main.async {
+                    self.isLoading = false
+                    switch completion {
+                    case .failure(let error):
+                        print("❌ Boss Settings 發佈失敗: \(error)")
+                        self.alertMessage = "發佈失敗，請檢查網絡連接後重試"
+                        self.showingSuccessAlert = true
+                    case .finished:
+                        break
+                    }
+                }
+            },
+            receiveValue: { [self] in
+                DispatchQueue.main.async {
+                    print("✅ Boss Settings 發佈成功！")
 
-        print("📦 即將發佈到 Firebase 的設定:")
-        print("   月份: \(monthString)")
-        print("   類型: \(vacationType.rawValue)")
-        print("   月限制: \(limits.monthlyLimit ?? 0)")
-        print("   週限制: \(limits.weeklyLimit ?? 0)")
-        print("   已發佈: \(limits.isPublished)")
-
-        // 使用 VacationLimitsManager 發佈
-        VacationLimitsManager.shared.syncToFirebase(limits) { success in
-            DispatchQueue.main.async {
-                if success {
-                    // 同時保存到本地
-                    let _ = VacationLimitsManager.shared.saveVacationLimits(limits)
-
-                    // 🔥 修復：直接使用 String(selectedYear) 而不是 .yearString
-                    self.alertMessage = "排休設定已成功發佈到雲端！\n\n目標月份: \(String(self.selectedYear))年\(String(format: "%02d", self.selectedMonth))月\n排休類型: \(self.vacationType.displayName)\n限制天數: \(self.vacationType == .monthly ? self.monthlyLimit : self.weeklyLimit) 天\n\n員工現在可以開始排休了！"
+                    self.alertMessage = """
+                    排休設定已成功發佈！
+                    
+                    目標月份: \(String(self.selectedYear))年\(String(format: "%02d", self.selectedMonth))月
+                    排休類型: \(self.vacationType.displayName)
+                    限制天數: \(self.vacationType == .monthly ? self.monthlyLimit : self.weeklyLimit) 天
+                    
+                    員工現在可以開始排休了！
+                    """
                     self.showingSuccessAlert = true
-                    print("✅ 發佈成功！已同步到 Firebase")
 
-                    // 🔥 新增：發送通知給 BossCalendarView
+                    // 發送通知
                     NotificationCenter.default.post(
                         name: Notification.Name("BossSettingsPublished"),
                         object: nil,
-                        userInfo: [
-                            "month": String(format: "%04d-%02d", self.selectedYear, self.selectedMonth)
-                        ]
+                        userInfo: ["month": monthString]
                     )
-
-                } else {
-                    self.alertMessage = "發佈失敗，請檢查網絡連接後重試"
-                    self.showingSuccessAlert = true
-                    print("❌ 發佈失敗！")
                 }
             }
-        }
+        )
+        .store(in: &cancellables)
     }
+
+    // MARK: - 🔥 新增：取消發佈
+    private func unpublishVacationSettings() {
+        print("🗑️ Boss Settings 取消發佈...")
+
+        isLoading = true
+
+        let monthString = String(format: "%04d-%02d", selectedYear, selectedMonth)
+
+        scheduleService.deleteVacationRule(
+            orgId: userManager.currentOrgId,
+            month: monthString
+        )
+        .sink(
+            receiveCompletion: { [self] completion in
+                DispatchQueue.main.async {
+                    self.isLoading = false
+                    switch completion {
+                    case .failure(let error):
+                        print("❌ Boss Settings 取消發佈失敗: \(error)")
+                        self.alertMessage = "取消發佈失敗，請重試"
+                        self.showingSuccessAlert = true
+                    case .finished:
+                        break
+                    }
+                }
+            },
+            receiveValue: { [self] in
+                DispatchQueue.main.async {
+                    print("✅ Boss Settings 取消發佈成功")
+
+                    self.alertMessage = "已成功取消發佈排休設定"
+                    self.showingSuccessAlert = true
+
+                    // 重置狀態
+                    self.currentFirebaseRule = nil
+                    self.hasExistingRule = false
+                    self.isPublished = false
+
+                    // 發送通知
+                    NotificationCenter.default.post(
+                        name: Notification.Name("VacationRuleUnpublished"),
+                        object: nil,
+                        userInfo: [
+                            "orgId": self.userManager.currentOrgId,
+                            "month": monthString
+                        ]
+                    )
+                }
+            }
+        )
+        .store(in: &cancellables)
+    }
+
+    // MARK: - Private Properties
+    @State private var cancellables = Set<AnyCancellable>()
 }
 
-// MARK: - Boss Date Picker Sheet
+// MARK: - Boss Date Picker Sheet (保持不變)
 struct BossDatePickerSheet: View {
     @Binding var selectedYear: Int
     @Binding var selectedMonth: Int
@@ -497,7 +735,6 @@ struct BossDatePickerSheet: View {
 
                         Picker("年", selection: $selectedYear) {
                             ForEach(years, id: \.self) { year in
-                                // 🔥 修復：直接使用 String(year) 而不是 .yearString
                                 Text(String(year))
                                     .font(.system(size: 20, weight: .medium))
                                     .tag(year)

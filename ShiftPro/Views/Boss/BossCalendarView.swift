@@ -8,7 +8,6 @@
 import SwiftUI
 
 struct BossCalendarView: View {
-
     // MARK: - Properties
     @ObservedObject var controller: CalendarController = CalendarController(orientation: .vertical)
     @StateObject private var viewModel = BossCalendarViewModel()
@@ -23,7 +22,7 @@ struct BossCalendarView: View {
     @State private var showingSettingsView = false
     @State private var showingSchedulePublishView = false
 
-    // 🚨 新增：只追蹤用戶實際看到的月份
+    // 🔥 優化：月份追蹤
     @State private var visibleMonth: String = ""
     @State private var isCalendarReady = false
 
@@ -38,6 +37,12 @@ struct BossCalendarView: View {
 
             editButtonOverlay()
                 .zIndex(2)
+
+            // 🔥 修復：載入指示器 - 檢查 viewModel 是否有此屬性
+            if viewModel.isFirebaseLoading {
+                loadingOverlay()
+                    .zIndex(3)
+            }
 
             ToastView(
                 message: viewModel.toastMessage,
@@ -85,31 +90,8 @@ struct BossCalendarView: View {
             handleSelectedAction(action)
         }
         .onAppear {
-            // 只初始化一次
-            if !isCalendarReady {
-                let now = Date()
-                let y = Calendar.current.component(.year, from: now)
-                let m = Calendar.current.component(.month, from: now)
-                let monthKey = String(format: "%04d-%02d", y, m)
-
-                visibleMonth = monthKey
-                viewModel.updateDisplayMonth(year: y, month: m)
-                isCalendarReady = true
-
-                print("📱 Boss 初始化日曆視圖: \(monthKey)")
-            }
-
-            menuState.currentVacationMode = viewModel.currentVacationMode
-
-            // 🔥 監聽從設定頁面發佈的通知
-            NotificationCenter.default.addObserver(
-                forName: Notification.Name("BossSettingsPublished"),
-                object: nil,
-                queue: .main
-            ) { [viewModel] notification in
-                print("📢 Boss 收到設定頁面發佈通知，重新載入狀態")
-                viewModel.forceReloadCurrentMonth()
-            }
+            setupCalendar()
+            syncMenuState()
         }
         .onChange(of: viewModel.currentVacationMode) { _, newMode in
             menuState.currentVacationMode = newMode
@@ -117,6 +99,26 @@ struct BossCalendarView: View {
         .onChange(of: menuState.currentVacationMode) { _, newMode in
             viewModel.currentVacationMode = newMode
         }
+    }
+
+    // MARK: - Setup
+    private func setupCalendar() {
+        guard !isCalendarReady else { return }
+
+        let now = Date()
+        let year = Calendar.current.component(.year, from: now)
+        let month = Calendar.current.component(.month, from: now)
+        let monthKey = String(format: "%04d-%02d", year, month)
+
+        visibleMonth = monthKey
+        viewModel.updateDisplayMonth(year: year, month: month)
+        isCalendarReady = true
+
+        print("📱 Boss 初始化日曆視圖: \(monthKey)")
+    }
+
+    private func syncMenuState() {
+        menuState.currentVacationMode = viewModel.currentVacationMode
     }
 
     // MARK: - Calendar View
@@ -133,39 +135,28 @@ struct BossCalendarView: View {
                     calendarGridView(month: month, cellHeight: cellHeight)
                 }
             }
-            // 🚨 關鍵修復：只監聽真正顯示在屏幕上的月份
             .onAppear {
                 handleVisibleMonthChange(month: month)
             }
         }
     }
 
-    // 🚨 新增：只處理真正可見的月份變化
+    // 🔥 優化：處理可見月份變化
     private func handleVisibleMonthChange(month: CalendarMonth) {
         let monthKey = String(format: "%04d-%02d", month.year, month.month)
 
-        // 只處理用戶真正可見的月份
-        guard isCalendarReady else {
-            print("📅 Boss 日曆尚未準備就緒，跳過: \(monthKey)")
-            return
-        }
+        guard isCalendarReady else { return }
+        guard monthKey != visibleMonth else { return }
+        guard isValidMonth(month: month) else { return }
 
-        // 防止處理相同月份
-        guard monthKey != visibleMonth else {
-            print("📅 Boss 月份相同，跳過: \(monthKey)")
-            return
-        }
-
-        // 🔥 修復：更嚴格的年份檢查，使用正確的年份格式
-        let currentYear = Calendar.current.component(.year, from: Date())
-        guard month.year >= currentYear - 1 && month.year <= currentYear + 2 else {
-            print("🚫 Boss 忽略不合理年份: \(month.year) (當前: \(currentYear))")
-            return
-        }
-
-        print("📅 Boss 用戶切換到可見月份: \(visibleMonth) -> \(monthKey)")
+        print("📅 Boss 切換到可見月份: \(visibleMonth) -> \(monthKey)")
         visibleMonth = monthKey
         viewModel.updateDisplayMonth(year: month.year, month: month.month)
+    }
+
+    private func isValidMonth(month: CalendarMonth) -> Bool {
+        let currentYear = Calendar.current.component(.year, from: Date())
+        return month.year >= currentYear - 1 && month.year <= currentYear + 2
     }
 
     // MARK: - Month Title View
@@ -186,7 +177,7 @@ struct BossCalendarView: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
 
-                        Text("\(month.year)年") // 🔥 修復：直接使用 month.year
+                        Text("\(month.year)年")
                             .font(.system(size: 18, weight: .medium))
                             .foregroundColor(.white.opacity(0.9))
 
@@ -197,16 +188,33 @@ struct BossCalendarView: View {
                 }
 
                 Spacer()
+
+                // 🔥 修復：處理中指示器 - 檢查屬性存在
+                if viewModel.isFirebaseLoading {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .blue))
+                            .scaleEffect(0.8)
+
+                        Text("處理中")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.blue)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.blue.opacity(0.2))
+                    .cornerRadius(12)
+                }
             }
 
-            // 🔥 修復：調整狀態顯示佈局，加入同步狀態
+            // 🔥 優化：狀態顯示
             HStack(spacing: 12) {
-                // Vacation Status
+                // Vacation Status - 使用真實 Firebase 狀態
                 statusBadge(
                     title: "排休狀態",
                     status: viewModel.vacationStatusText,
                     color: viewModel.vacationStatusColor,
-                    icon: viewModel.isVacationPublished ? "checkmark.circle.fill" : "clock.circle.fill"
+                    icon: getVacationIcon()
                 )
 
                 // Schedule Status
@@ -217,12 +225,40 @@ struct BossCalendarView: View {
                     icon: viewModel.isSchedulePublished ? "checkmark.circle.fill" : "clock.circle.fill"
                 )
 
-                // 🔥 移動同步狀態到這裡，與其他狀態對齊
+                // 🔥 優化：顯示更多資訊
+                if let rule = viewModel.firebaseRule {
+                    VStack(spacing: 2) {
+                        Text("\(rule.monthlyLimit ?? 0)天")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.green)
+
+                        Text("月限制")
+                            .font(.system(size: 8))
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(Color.green.opacity(0.2))
+                    .cornerRadius(8)
+                }
+
+                // Sync Status
                 SyncStatusView()
             }
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 20)
+    }
+
+    // 🔥 修復：動態圖標 - 檢查屬性存在
+    private func getVacationIcon() -> String {
+        if viewModel.isFirebaseLoading {
+            return "clock.arrow.circlepath"
+        } else if viewModel.isVacationPublished {
+            return "checkmark.circle.fill"
+        } else {
+            return "clock.circle.fill"
+        }
     }
 
     private func statusBadge(title: String, status: String, color: Color, icon: String) -> some View {
@@ -308,6 +344,27 @@ struct BossCalendarView: View {
         }
     }
 
+    // MARK: - Loading Overlay
+    private func loadingOverlay() -> some View {
+        ZStack {
+            Color.black.opacity(0.3)
+                .ignoresSafeArea()
+
+            VStack(spacing: 16) {
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    .scaleEffect(1.2)
+
+                Text("處理中...")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.white)
+            }
+            .padding(24)
+            .background(Color.black.opacity(0.8))
+            .cornerRadius(16)
+        }
+    }
+
     // MARK: - Top Buttons Overlay
     private func topButtonsOverlay() -> some View {
         VStack {
@@ -357,6 +414,8 @@ struct BossCalendarView: View {
                     .clipShape(Capsule())
                     .shadow(color: .black.opacity(0.15), radius: 8, x: 0, y: 4)
                 }
+                // 🔥 修復：檢查屬性存在才 disable
+                .disabled(viewModel.isFirebaseLoading)
             }
             .padding(.bottom, 30)
             .padding(.trailing, 30)
@@ -369,7 +428,6 @@ struct BossCalendarView: View {
 
         switch action {
         case .publishVacation, .manageVacationLimits:
-            // 兩個操作都導向同一個設定頁面
             showingSettingsView = true
         case .publishSchedule:
             showingSchedulePublishView = true

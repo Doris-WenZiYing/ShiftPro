@@ -44,4 +44,18 @@ extension CalendarMonth {
     var displayString: String {
         return "\(String(self.year))年\(String(format: "%02d", self.month))月"
     }
+
+    /// 🔥 新增：獲取當前實際月份
+    static var currentActual: CalendarMonth {
+        let now = Date()
+        return CalendarMonth(
+            year: Calendar.current.component(.year, from: now),
+            month: Calendar.current.component(.month, from: now)
+        )
+    }
+
+    /// 🔥 新增：轉換為 yyyy-MM 格式字串
+    var monthKey: String {
+        return String(format: "%04d-%02d", self.year, self.month)
+    }
 }
