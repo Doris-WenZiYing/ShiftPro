@@ -686,8 +686,6 @@ struct EmployeeScheduleEditView: View {
 
     private func calendarGrid() -> some View {
         let days = getDaysInMonth()
-
-        // 🔥 修復問題2：動態列數，根據實際天數調整
         let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
 
         return LazyVGrid(columns: columns, spacing: 4) {
@@ -788,7 +786,7 @@ struct EmployeeScheduleEditView: View {
         return formatter.string(from: currentDate)
     }
 
-    // 🔥 修復問題2：只顯示當月日期，不使用 7*6 格子
+    // 🔥 修復問題1：正確生成日曆排列
     private func getDaysInMonth() -> [CalendarDay] {
         let year = calendar.component(.year, from: currentDate)
         let month = calendar.component(.month, from: currentDate)
@@ -800,12 +798,49 @@ struct EmployeeScheduleEditView: View {
         let range = calendar.range(of: .day, in: .month, for: firstDay)!
         let daysInMonth = range.count
 
+        // 🔥 修復：計算第一天是星期幾（0=周日, 1=周一, ..., 6=周六）
+        let firstWeekday = calendar.component(.weekday, from: firstDay) - 1
+
         var days: [CalendarDay] = []
 
-        // 🔥 修復問題2：只添加當前月份的日期
+        // 🔥 修復：添加前面月份的空白天數
+        if firstWeekday > 0 {
+            let prevMonth = calendar.date(byAdding: .month, value: -1, to: firstDay)!
+            let prevRange = calendar.range(of: .day, in: .month, for: prevMonth)!
+            let prevDaysCount = prevRange.count
+
+            // 從上個月的末尾開始填充
+            for day in (prevDaysCount - firstWeekday + 1)...prevDaysCount {
+                if let date = calendar.date(from: DateComponents(
+                    year: calendar.component(.year, from: prevMonth),
+                    month: calendar.component(.month, from: prevMonth),
+                    day: day
+                )) {
+                    days.append(CalendarDay(date: date, isWithinDisplayedMonth: false))
+                }
+            }
+        }
+
+        // 🔥 修復：添加當前月份的所有天數
         for day in 1...daysInMonth {
             if let date = calendar.date(from: DateComponents(year: year, month: month, day: day)) {
                 days.append(CalendarDay(date: date, isWithinDisplayedMonth: true))
+            }
+        }
+
+        // 🔥 修復：添加下個月的天數以填滿6週格子（42格）
+        let totalCellsNeeded = 42
+        let remainingCells = totalCellsNeeded - days.count
+        if remainingCells > 0 {
+            let nextMonth = calendar.date(byAdding: .month, value: 1, to: firstDay)!
+            for day in 1...remainingCells {
+                if let date = calendar.date(from: DateComponents(
+                    year: calendar.component(.year, from: nextMonth),
+                    month: calendar.component(.month, from: nextMonth),
+                    day: day
+                )) {
+                    days.append(CalendarDay(date: date, isWithinDisplayedMonth: false))
+                }
             }
         }
 
