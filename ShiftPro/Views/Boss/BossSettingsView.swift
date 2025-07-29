@@ -152,6 +152,7 @@ struct BossSettingsView: View {
 
             Button(action: { showingDatePicker = true }) {
                 HStack {
+                    // 🔥 修復問題3：直接使用字串轉換
                     Text("\(String(selectedYear))年\(String(format: "%02d", selectedMonth))月")
                         .font(.system(size: 24, weight: .bold))
                         .foregroundColor(.white)
@@ -427,6 +428,7 @@ struct BossSettingsView: View {
             }
 
             VStack(spacing: 12) {
+                // 🔥 修復問題3：預覽中的年月顯示
                 previewRow("calendar.circle", "目標月份", "\(String(selectedYear))年\(String(format: "%02d", selectedMonth))月")
                 previewRow("calendar.badge.checkmark", "排休類型", vacationType.displayName)
 
@@ -711,7 +713,7 @@ struct BossSettingsView: View {
     @State private var cancellables = Set<AnyCancellable>()
 }
 
-// MARK: - Boss Date Picker Sheet (保持不變)
+// MARK: - Boss Date Picker Sheet
 struct BossDatePickerSheet: View {
     @Binding var selectedYear: Int
     @Binding var selectedMonth: Int
@@ -735,6 +737,7 @@ struct BossDatePickerSheet: View {
 
                         Picker("年", selection: $selectedYear) {
                             ForEach(years, id: \.self) { year in
+                                // 🔥 修復問題3：直接使用字串轉換
                                 Text(String(year))
                                     .font(.system(size: 20, weight: .medium))
                                     .tag(year)

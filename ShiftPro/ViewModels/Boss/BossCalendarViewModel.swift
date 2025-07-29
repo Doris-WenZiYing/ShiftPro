@@ -31,11 +31,14 @@ class BossCalendarViewModel: ObservableObject {
     private let userManager = UserManager.shared
     private var cancellables = Set<AnyCancellable>()
 
-    // MARK: - 🔥 修復問題5：智能快取和監聽管理，Toast 控制
+    // MARK: - 🔥 修復：智能快取和監聽管理，移除 ToastCooldownManager
     private var firebaseListeners: [String: AnyCancellable] = [:]
     private var dataCache: [String: CachedBossData] = [:]
     private var isInitialized = false
-    private var hasShownPublishToast: Set<String> = [] // 🔥 新增：控制發佈成功 Toast
+
+    // 🔥 新增：狀態追蹤而非冷卻機制
+    private var lastKnownPublishState: [String: Bool] = [:]
+    private var isUserInitiatedAction = false
 
     // MARK: - Computed Properties
     private var currentOrgId: String { userManager.currentOrgId }
@@ -113,7 +116,7 @@ class BossCalendarViewModel: ObservableObject {
         }
     }
 
-    // MARK: - 🔥 優化：月份更新
+    // MARK: - 🔥 修復：月份更新，移除冷卻機制
     func updateDisplayMonth(year: Int, month: Int) {
         guard isInitialized else { return }
 
@@ -127,9 +130,6 @@ class BossCalendarViewModel: ObservableObject {
         removeFirebaseListener(for: currentDisplayMonth)
 
         currentDisplayMonth = newMonth
-
-        // 🔥 修復問題5：重置發佈 Toast 狀態
-        hasShownPublishToast.remove(newMonth)
 
         loadCurrentMonthData()
     }
@@ -162,6 +162,10 @@ class BossCalendarViewModel: ObservableObject {
            let status = try? JSONDecoder().decode(BossPublishStatus.self, from: data) {
             isVacationPublished = status.vacationPublished
             isSchedulePublished = status.schedulePublished
+
+            // 🔥 初始化狀態追蹤
+            lastKnownPublishState[currentDisplayMonth] = status.vacationPublished
+
             print("📱 Boss 載入本地狀態: 排休=\(isVacationPublished)")
         }
     }
@@ -181,25 +185,36 @@ class BossCalendarViewModel: ObservableObject {
         print("👂 Boss 設置 Firebase 監聽: \(listenerId)")
     }
 
-    // 🔥 修復問題5：優化規則更新處理，控制 Toast 顯示
+    // 🔥 修復：優化規則更新處理，正確的狀態管理
     private func handleRuleUpdate(_ rule: FirestoreVacationRule?) {
         firebaseRule = rule
+        let monthKey = currentDisplayMonth
 
         if let r = rule {
-            let wasPublished = isVacationPublished
-            isVacationPublished = r.published
+            let newPublishState = r.published
+            let lastKnownState = lastKnownPublishState[monthKey]
 
-            // 更新模式
+            // 更新狀態
+            isVacationPublished = newPublishState
             currentVacationMode = VacationMode(rawValue: r.type) ?? .monthly
 
-            // 🔥 修復問題5：只在真正變化且未顯示過時顯示通知
-            if r.published && !wasPublished && !hasShownPublishToast.contains(currentDisplayMonth) {
-                showToast("排休設定已發佈並同步", type: .success)
-                hasShownPublishToast.insert(currentDisplayMonth)
+            // 🔥 只在真正的狀態變化時顯示 Toast（且不是用戶主動操作）
+            if newPublishState && !isUserInitiatedAction {
+                // 只有在已經記錄過狀態且狀態確實發生變化時才顯示
+                if let lastState = lastKnownState, !lastState {
+                    showToast("排休設定已同步更新", type: .success)
+                }
             }
+
+            // 更新記錄的狀態
+            lastKnownPublishState[monthKey] = newPublishState
         } else {
             isVacationPublished = false
+            lastKnownPublishState[monthKey] = false
         }
+
+        // 重置用戶操作標記
+        isUserInitiatedAction = false
 
         // 更新快取和本地狀態
         updateCache(rule: rule)
@@ -237,7 +252,7 @@ class BossCalendarViewModel: ObservableObject {
     private func clearAllCache() {
         dataCache.removeAll()
         firebaseRule = nil
-        hasShownPublishToast.removeAll() // 🔥 修復問題5：清除發佈 Toast 記錄
+        lastKnownPublishState.removeAll()
     }
 
     // MARK: - 🔥 優化：Firebase 監聽管理
@@ -253,13 +268,16 @@ class BossCalendarViewModel: ObservableObject {
         print("🔇 Boss 移除所有監聽")
     }
 
-    // MARK: - 🔥 優化：排休發佈
+    // MARK: - 🔥 修復：排休發佈
     func publishVacationSetting(_ setting: VacationSetting) {
         print("🚀 Boss 發佈排休設定...")
         print("   組織: \(currentOrgId)")
         print("   月份: \(currentDisplayMonth)")
         print("   類型: \(setting.type.rawValue)")
         print("   天數: \(setting.allowedDays)")
+
+        // 🔥 標記為用戶主動操作
+        isUserInitiatedAction = true
 
         // 標記為處理中
         pendingPublications.insert(currentDisplayMonth)
@@ -284,6 +302,7 @@ class BossCalendarViewModel: ObservableObject {
                     print("❌ Boss 發佈失敗: \(error)")
                     SyncStatusManager.shared.setSyncError()
                     self?.showToast("發佈失敗，請重試", type: .error)
+                    self?.isUserInitiatedAction = false
                 case .finished:
                     break
                 }
@@ -293,10 +312,12 @@ class BossCalendarViewModel: ObservableObject {
                 print("✅ Boss 發佈成功！")
                 SyncStatusManager.shared.setSyncSuccess()
 
-                // 🔥 修復問題5：只在此處顯示成功通知，標記已顯示
-                if let month = self?.currentDisplayMonth, ((self?.hasShownPublishToast.contains(month)) == nil) {
-                    self?.showToast("發佈排休成功！員工現在可以開始排休了", type: .success)
-                    self?.hasShownPublishToast.insert(month)
+                // 🔥 用戶主動發佈時顯示成功訊息
+                self?.showToast("發佈排休成功！員工現在可以開始排休了", type: .success)
+
+                // 更新狀態記錄
+                if let monthKey = self?.currentDisplayMonth {
+                    self?.lastKnownPublishState[monthKey] = true
                 }
 
                 // 發送通知
@@ -316,9 +337,12 @@ class BossCalendarViewModel: ObservableObject {
         .store(in: &cancellables)
     }
 
-    // MARK: - 🔥 優化：取消發佈
+    // MARK: - 🔥 修復：取消發佈
     func unpublishVacation() {
         print("🗑️ Boss 取消發佈排休...")
+
+        // 標記為用戶主動操作
+        isUserInitiatedAction = true
 
         isFirebaseLoading = true
         SyncStatusManager.shared.setSyncing()
@@ -333,6 +357,7 @@ class BossCalendarViewModel: ObservableObject {
                         print("❌ Boss 取消發佈失敗: \(error)")
                         SyncStatusManager.shared.setSyncError()
                         self?.showToast("取消發佈失敗", type: .error)
+                        self?.isUserInitiatedAction = false
                     case .finished:
                         break
                     }
@@ -343,9 +368,9 @@ class BossCalendarViewModel: ObservableObject {
                     SyncStatusManager.shared.setSyncSuccess()
                     self?.showToast("取消發佈成功", type: .warning)
 
-                    // 🔥 修復問題5：重置發佈 Toast 狀態
-                    if let month = self?.currentDisplayMonth {
-                        self?.hasShownPublishToast.remove(month)
+                    // 更新狀態記錄
+                    if let monthKey = self?.currentDisplayMonth {
+                        self?.lastKnownPublishState[monthKey] = false
                     }
 
                     // 發送通知
@@ -491,6 +516,8 @@ class BossCalendarViewModel: ObservableObject {
             if let month = notification.userInfo?["month"] as? String,
                month == self?.currentDisplayMonth {
                 print("📢 Boss 收到設定頁面發佈通知")
+                // 標記為用戶操作避免重複 Toast
+                self?.isUserInitiatedAction = true
                 self?.forceReloadCurrentMonth()
             }
         }

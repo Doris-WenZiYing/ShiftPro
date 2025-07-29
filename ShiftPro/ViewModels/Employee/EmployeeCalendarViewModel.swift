@@ -35,10 +35,11 @@ class EmployeeCalendarViewModel: ObservableObject {
 
     // MARK: - 🔥 修復數據丟失：每月獨立的數據管理
     private var monthlyVacationData: [String: VacationData] = [:]
-    private var hasShownInitialToast: Set<String> = []
-    private var hasShownPublishToast: Set<String> = []
     private var lastToastTime: Date = Date.distantPast
     private let toastCooldownInterval: TimeInterval = 2.0
+
+    // 🔥 修復：狀態追蹤而非冷卻機制
+    private var lastKnownBossSettingState: [String: Bool] = [:]
 
     // MARK: - 🔥 優化：智能快取與狀態管理
     private var firebaseListeners: [String: AnyCancellable] = [:]
@@ -199,10 +200,6 @@ class EmployeeCalendarViewModel: ObservableObject {
         // 🔥 修復：載入新月份的獨立數據
         vacationData = getVacationData(for: newMonth)
 
-        // 重置 Toast 狀態
-        hasShownInitialToast.remove(newMonth)
-        hasShownPublishToast.remove(newMonth)
-
         loadCurrentMonthData()
     }
 
@@ -256,21 +253,31 @@ class EmployeeCalendarViewModel: ObservableObject {
         print("👂 Employee 設置 Firebase 監聽: \(listenerId)")
     }
 
+    // 🔥 修復：老闆設定狀態更新處理
     private func handleRuleUpdate(_ rule: FirestoreVacationRule?) {
         firebaseRule = rule
+        let monthKey = currentDisplayMonth
 
         if let r = rule {
-            currentVacationMode = VacationMode(rawValue: r.type) ?? .monthly
-            let wasUsingBossSettings = isUsingBossSettings
-            isUsingBossSettings = r.published
+            let newBossSettingState = r.published
+            let lastKnownState = lastKnownBossSettingState[monthKey]
 
-            // 只在真正變化且未顯示過時顯示通知
-            if r.published && !wasUsingBossSettings && !hasShownPublishToast.contains(currentDisplayMonth) {
-                showToast("老闆發佈了 \(getMonthDisplayText()) 的排休設定！", type: .success)
-                hasShownPublishToast.insert(currentDisplayMonth)
+            currentVacationMode = VacationMode(rawValue: r.type) ?? .monthly
+            isUsingBossSettings = newBossSettingState
+
+            // 🔥 只在老闆新發佈設定時顯示通知
+            if newBossSettingState {
+                // 只有在已經記錄過狀態且狀態確實發生變化時才顯示
+                if let lastState = lastKnownState, !lastState {
+                    showToastWithCooldown("老闆發佈了 \(getMonthDisplayText()) 的排休設定！", type: .success)
+                }
             }
+
+            // 更新記錄的狀態
+            lastKnownBossSettingState[monthKey] = newBossSettingState
         } else {
             isUsingBossSettings = false
+            lastKnownBossSettingState[monthKey] = false
         }
     }
 
@@ -328,8 +335,7 @@ class EmployeeCalendarViewModel: ObservableObject {
         dataCache.removeAll()
         firebaseRule = nil
         firebaseSchedule = nil
-        hasShownInitialToast.removeAll()
-        hasShownPublishToast.removeAll()
+        lastKnownBossSettingState.removeAll()
     }
 
     // MARK: - 🔥 優化：Firebase 監聽管理
@@ -667,7 +673,7 @@ class EmployeeCalendarViewModel: ObservableObject {
         }
     }
 
-    // MARK: - 通知監聽
+    // MARK: - 🔥 修復：通知監聽優化
     private func setupNotificationListeners() {
         NotificationCenter.default.addObserver(
             forName: Notification.Name("VacationRulePublished"),
@@ -679,6 +685,16 @@ class EmployeeCalendarViewModel: ObservableObject {
                orgId == self?.currentOrgId,
                month == self?.currentDisplayMonth {
                 print("📢 Employee 收到發佈通知")
+
+                // 🔥 收到外部通知時，可以顯示提示（但要檢查是否為重複）
+                if let self = self {
+                    let monthKey = self.currentDisplayMonth
+                    let lastState = self.lastKnownBossSettingState[monthKey] ?? false
+                    if !lastState {
+                        self.showToastWithCooldown("收到新的排休設定！", type: .info)
+                    }
+                }
+
                 self?.setupFirebaseListeners()
             }
         }
@@ -694,6 +710,13 @@ class EmployeeCalendarViewModel: ObservableObject {
                month == self?.currentDisplayMonth {
                 print("📢 Employee 收到取消發佈通知")
                 self?.isUsingBossSettings = false
+
+                // 更新狀態記錄
+                if let self = self {
+                    let monthKey = self.currentDisplayMonth
+                    self.lastKnownBossSettingState[monthKey] = false
+                }
+
                 self?.showToastWithCooldown("老闆已取消發佈排休設定", type: .warning)
             }
         }

@@ -178,7 +178,7 @@ struct BossCalendarView: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
 
-                        // 🔥 修復年份顯示問題：直接使用 Int 轉 String
+                        // 🔥 修復問題3：直接使用 Int 轉 String，避免格式化器
                         Text("\(month.year)年")
                             .font(.system(size: 18, weight: .medium))
                             .foregroundColor(.white.opacity(0.9))
