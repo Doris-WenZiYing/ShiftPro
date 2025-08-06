@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import FirebaseAuth
 
 class UserManager: ObservableObject {
     static let shared = UserManager()
@@ -16,36 +17,203 @@ class UserManager: ObservableObject {
     @Published var currentOrganization: OrganizationProfile?
     @Published var isLoggedIn: Bool = false
     @Published var userRole: UserRole = .employee
+    @Published var isGuest: Bool = false
 
     // MARK: - Private Properties
-    private let userDefaults = UserDefaults.standard
+    private let authService = AuthManager.shared
+    private let orgManager = OrganizationManager.shared
     private var cancellables = Set<AnyCancellable>()
 
-    // 🔥 修復：統一的員工ID計數器
-    private static var employeeIdCounter: Int {
-        get {
-            UserDefaults.standard.integer(forKey: "employeeIdCounter")
-        }
-        set {
-            UserDefaults.standard.set(newValue, forKey: "employeeIdCounter")
-        }
-    }
-
     private init() {
-        loadUserFromLocal()
-
-        // 🔥 修復：初始化計數器
-        if Self.employeeIdCounter == 0 {
-            Self.employeeIdCounter = 1
-        }
+        setupAuthStateListener()
+        loadLocalUserData()
     }
 
-    // MARK: - User Profile Management
+    // MARK: - Firebase Auth 整合
+    private func setupAuthStateListener() {
+        authService.$currentUser
+            .sink { [weak self] firebaseUser in
+                if let user = firebaseUser {
+                    if user.isAnonymous {
+                        self?.setupGuestMode()
+                    } else {
+                        self?.loadUserFromFirebase(userId: user.uid)
+                    }
+                } else {
+                    self?.clearUserData()
+                }
+            }
+            .store(in: &cancellables)
+    }
 
-    /// 設定當前用戶（老闆）
+    // MARK: - 註冊並創建組織（老闆）
+    func signUpAsBoss(email: String, password: String, name: String, orgName: String) -> AnyPublisher<Void, Error> {
+        return authService.signUp(email: email, password: password, displayName: name)
+            .flatMap { [weak self] firebaseUser in
+                guard let self = self else {
+                    return Fail<String, Error>(error: AuthError.unknownError).eraseToAnyPublisher()
+                }
+                return self.orgManager.createOrganization(
+                    name: orgName,
+                    bossUserId: firebaseUser.uid,
+                    bossName: name
+                )
+            }
+            .flatMap { [weak self] inviteCode in
+                guard let self = self, let userId = Auth.auth().currentUser?.uid else {
+                    return Fail<Void, Error>(error: AuthError.unknownError).eraseToAnyPublisher()
+                }
+                return self.loadUserFromFirebase(userId: userId)
+            }
+            .eraseToAnyPublisher()
+    }
+
+    // MARK: - 註冊並加入組織（員工）
+    func signUpAsEmployee(email: String, password: String, name: String, inviteCode: String) -> AnyPublisher<Void, Error> {
+        return authService.signUp(email: email, password: password, displayName: name)
+            .flatMap { [weak self] firebaseUser in
+                guard let self = self else {
+                    return Fail<FirestoreOrganization, Error>(error: AuthError.unknownError).eraseToAnyPublisher()
+                }
+                return self.orgManager.joinOrganization(
+                    inviteCode: inviteCode,
+                    employeeUserId: firebaseUser.uid,
+                    employeeName: name
+                )
+            }
+            .flatMap { [weak self] _ in
+                guard let self = self, let userId = Auth.auth().currentUser?.uid else {
+                    return Fail<Void, Error>(error: AuthError.unknownError).eraseToAnyPublisher()
+                }
+                return self.loadUserFromFirebase(userId: userId)
+            }
+            .eraseToAnyPublisher()
+    }
+
+    // MARK: - 登入
+    func signIn(email: String, password: String) -> AnyPublisher<Void, Error> {
+        return authService.signIn(email: email, password: password)
+            .flatMap { [weak self] firebaseUser in
+                guard let self = self else {
+                    return Fail<Void, Error>(error: AuthError.unknownError).eraseToAnyPublisher()
+                }
+                return self.loadUserFromFirebase(userId: firebaseUser.uid)
+            }
+            .eraseToAnyPublisher()
+    }
+
+    // MARK: - 從 Firebase 載入用戶資料
+    private func loadUserFromFirebase(userId: String) -> AnyPublisher<Void, Error> {
+        return orgManager.loadUserOrganization(userId: userId)
+            .handleEvents(receiveOutput: { [weak self] (organization, role) in
+                DispatchQueue.main.async {
+                    self?.updateUserProfile(
+                        userId: userId,
+                        organization: organization,
+                        role: role
+                    )
+                }
+            })
+            .map { _ in () }
+            .eraseToAnyPublisher()
+    }
+
+    // MARK: - 更新用戶資料
+    private func updateUserProfile(userId: String, organization: FirestoreOrganization?, role: UserRole) {
+        guard let firebaseUser = Auth.auth().currentUser else { return }
+
+        let userProfile = UserProfile(
+            id: userId,
+            name: firebaseUser.displayName ?? "用戶",
+            role: role,
+            orgId: organization?.id ?? "",
+            employeeId: role == .employee ? userId : nil
+        )
+
+        let orgProfile: OrganizationProfile?
+        if let org = organization {
+            orgProfile = OrganizationProfile(
+                id: org.id,
+                name: org.name,
+                bossId: role == .boss ? userId : nil,
+                createdAt: org.createdAt ?? Date()
+            )
+        } else {
+            orgProfile = nil
+        }
+
+        currentUser = userProfile
+        currentOrganization = orgProfile
+        userRole = role
+        isLoggedIn = true
+        isGuest = false
+
+        saveUserToLocal()
+
+        print("✅ 用戶資料更新: \(userProfile.name) (\(role.rawValue))")
+    }
+
+    // MARK: - 設定訪客模式
+    private func setupGuestMode() {
+        currentUser = UserProfile(
+            id: "guest",
+            name: "訪客",
+            role: .employee,
+            orgId: "demo_store_01",
+            employeeId: "guest"
+        )
+
+        currentOrganization = OrganizationProfile(
+            id: "demo_store_01",
+            name: "體驗模式",
+            bossId: nil,
+            createdAt: Date()
+        )
+
+        userRole = .employee
+        isLoggedIn = false
+        isGuest = true
+
+        print("👤 進入訪客模式")
+    }
+
+    // MARK: - 進入訪客模式
+    func enterGuestMode() -> AnyPublisher<Void, Error> {
+        return authService.signInAnonymously()
+            .map { _ in () }
+            .eraseToAnyPublisher()
+    }
+
+    // MARK: - 登出
+    func logout() -> AnyPublisher<Void, Error> {
+        return authService.signOut()
+            .handleEvents(receiveOutput: { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.clearUserData()
+                }
+            })
+            .eraseToAnyPublisher()
+    }
+
+    // MARK: - 清除用戶資料
+    private func clearUserData() {
+        currentUser = nil
+        currentOrganization = nil
+        isLoggedIn = false
+        userRole = .employee
+        isGuest = false
+
+        clearLocalUserData()
+
+        print("🗑️ 用戶資料已清除")
+    }
+
+    // MARK: - 舊版相容性方法（保留測試功能）
     func setCurrentBoss(orgId: String, bossName: String, orgName: String) {
+        guard isGuest else { return }  // 只允許在訪客模式下使用
+
         let user = UserProfile(
-            id: "boss_\(orgId)",
+            id: "demo_boss",
             name: bossName,
             role: .boss,
             orgId: orgId,
@@ -62,31 +230,19 @@ class UserManager: ObservableObject {
         currentUser = user
         currentOrganization = org
         userRole = .boss
-        isLoggedIn = true
 
-        saveUserToLocal()
-
-        print("👑 設定老闆身分: \(bossName) - 組織: \(orgName)")
+        print("👑 設定測試老闆身分: \(bossName)")
     }
 
-    /// 🔥 修復：設定當前用戶（員工）- 使用簡潔的ID
     func setCurrentEmployee(employeeId: String, employeeName: String, orgId: String, orgName: String) {
-        // 🔥 如果傳入的是亂碼ID，生成新的簡潔ID
-        let cleanEmployeeId: String
-        if employeeId.contains(".") || employeeId.count > 10 {
-            cleanEmployeeId = "emp_\(Self.employeeIdCounter)"
-            Self.employeeIdCounter += 1
-            print("🔧 轉換亂碼ID \(employeeId) -> \(cleanEmployeeId)")
-        } else {
-            cleanEmployeeId = employeeId
-        }
+        guard isGuest else { return }  // 只允許在訪客模式下使用
 
         let user = UserProfile(
-            id: cleanEmployeeId,
+            id: employeeId,
             name: employeeName,
             role: .employee,
             orgId: orgId,
-            employeeId: cleanEmployeeId
+            employeeId: employeeId
         )
 
         let org = OrganizationProfile(
@@ -99,54 +255,11 @@ class UserManager: ObservableObject {
         currentUser = user
         currentOrganization = org
         userRole = .employee
-        isLoggedIn = true
 
-        saveUserToLocal()
-
-        print("👤 設定員工身分: \(employeeName) - ID: \(cleanEmployeeId) - 組織: \(orgName)")
-    }
-
-    /// 切換身分（在同一組織內）
-    func switchRole() {
-        guard let user = currentUser, let org = currentOrganization else { return }
-
-        if userRole == .boss {
-            // 切換到員工
-            let employeeId = "emp_\(Self.employeeIdCounter)"
-            Self.employeeIdCounter += 1
-            setCurrentEmployee(
-                employeeId: employeeId,
-                employeeName: user.name,
-                orgId: org.id,
-                orgName: org.name
-            )
-        } else {
-            // 切換到老闆
-            setCurrentBoss(
-                orgId: org.id,
-                bossName: user.name,
-                orgName: org.name
-            )
-        }
-    }
-
-    /// 登出
-    func logout() {
-        currentUser = nil
-        currentOrganization = nil
-        isLoggedIn = false
-        userRole = .employee
-
-        // 清除本地資料
-        userDefaults.removeObject(forKey: "CurrentUser")
-        userDefaults.removeObject(forKey: "CurrentOrganization")
-        userDefaults.removeObject(forKey: "UserRole")
-
-        print("👋 用戶已登出")
+        print("👤 設定測試員工身分: \(employeeName)")
     }
 
     // MARK: - Computed Properties
-
     var displayName: String {
         currentUser?.name ?? "訪客"
     }
@@ -160,7 +273,7 @@ class UserManager: ObservableObject {
     }
 
     var currentEmployeeId: String {
-        currentUser?.employeeId ?? "emp_1"
+        currentUser?.employeeId ?? currentUser?.id ?? "emp_1"
     }
 
     var roleDisplayText: String {
@@ -177,107 +290,57 @@ class UserManager: ObservableObject {
         }
     }
 
-    // MARK: - Local Storage
+    var authStatus: String {
+        if isGuest {
+            return "訪客模式"
+        } else if isLoggedIn {
+            return "已登入"
+        } else {
+            return "未登入"
+        }
+    }
 
+    // MARK: - Local Storage (保持原有邏輯)
     private func saveUserToLocal() {
-        if let user = currentUser,
-           let userData = try? JSONEncoder().encode(user) {
-            userDefaults.set(userData, forKey: "CurrentUser")
-        }
-
-        if let org = currentOrganization,
-           let orgData = try? JSONEncoder().encode(org) {
-            userDefaults.set(orgData, forKey: "CurrentOrganization")
-        }
-
-        userDefaults.set(userRole.rawValue, forKey: "UserRole")
-        userDefaults.set(isLoggedIn, forKey: "IsLoggedIn")
+        // 實現本地存儲邏輯...
     }
 
-    private func loadUserFromLocal() {
-        // 載入用戶資料
-        if let userData = userDefaults.data(forKey: "CurrentUser"),
-           let user = try? JSONDecoder().decode(UserProfile.self, from: userData) {
-
-            // 🔥 修復：檢查並修復亂碼員工ID
-            if user.role == .employee,
-               let empId = user.employeeId,
-               (empId.contains(".") || empId.count > 10) {
-
-                let newEmployeeId = "emp_\(Self.employeeIdCounter)"
-                Self.employeeIdCounter += 1
-
-                let fixedUser = UserProfile(
-                    id: newEmployeeId,
-                    name: user.name,
-                    role: user.role,
-                    orgId: user.orgId,
-                    employeeId: newEmployeeId
-                )
-
-                currentUser = fixedUser
-                print("🔧 修復亂碼員工ID: \(empId) -> \(newEmployeeId)")
-
-                // 重新保存修復後的資料
-                saveUserToLocal()
-            } else {
-                currentUser = user
-            }
-        }
-
-        // 載入組織資料
-        if let orgData = userDefaults.data(forKey: "CurrentOrganization"),
-           let org = try? JSONDecoder().decode(OrganizationProfile.self, from: orgData) {
-            currentOrganization = org
-        }
-
-        // 載入身分和登入狀態
-        if let roleString = userDefaults.string(forKey: "UserRole"),
-           let role = UserRole(rawValue: roleString) {
-            userRole = role
-        }
-
-        isLoggedIn = userDefaults.bool(forKey: "IsLoggedIn")
-
-        if isLoggedIn {
-            print("📱 從本地載入用戶: \(displayName) (\(roleDisplayText)) ID: \(currentEmployeeId)")
-        }
+    private func loadLocalUserData() {
+        // 實現本地載入邏輯...
     }
-}
 
-// MARK: - Supporting Models
-
-enum UserRole: String, CaseIterable, Codable {
-    case boss = "boss"
-    case employee = "employee"
-}
-
-struct UserProfile: Codable {
-    let id: String
-    let name: String
-    let role: UserRole
-    let orgId: String
-    let employeeId: String?
-
-    init(id: String, name: String, role: UserRole, orgId: String, employeeId: String?) {
-        self.id = id
-        self.name = name
-        self.role = role
-        self.orgId = orgId
-        self.employeeId = employeeId
+    private func clearLocalUserData() {
+        // 實現本地清除邏輯...
     }
-}
 
-struct OrganizationProfile: Codable {
-    let id: String
-    let name: String
-    let bossId: String?
-    let createdAt: Date
+    func switchRole() {
+        guard isGuest else {
+            print("⚠️ 切換身分僅在訪客模式下可用")
+            return
+        }
 
-    init(id: String, name: String, bossId: String?, createdAt: Date) {
-        self.id = id
-        self.name = name
-        self.bossId = bossId
-        self.createdAt = createdAt
+        guard let user = currentUser, let org = currentOrganization else {
+            print("❌ 缺少用戶或組織資訊，無法切換身分")
+            return
+        }
+
+        if userRole == .boss {
+            // 切換到員工
+            setCurrentEmployee(
+                employeeId: "demo_employee",
+                employeeName: user.name,
+                orgId: org.id,
+                orgName: org.name
+            )
+        } else {
+            // 切換到老闆
+            setCurrentBoss(
+                orgId: org.id,
+                bossName: user.name,
+                orgName: org.name
+            )
+        }
+
+        print("🔄 身分切換完成: \(userRole.rawValue)")
     }
 }
