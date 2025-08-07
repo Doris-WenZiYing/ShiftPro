@@ -11,7 +11,7 @@ import Combine
 class FirebaseInitializer: ObservableObject {
     static let shared = FirebaseInitializer()
 
-    private let scheduleService: ScheduleService
+    private let firebase = FirebaseService.shared
     private var cancellables = Set<AnyCancellable>()
 
     @Published var isInitializing = false

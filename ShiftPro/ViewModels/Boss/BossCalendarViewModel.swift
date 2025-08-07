@@ -26,7 +26,7 @@ class BossCalendarViewModel: ObservableObject {
     @Published var pendingPublications: Set<String> = []
 
     // MARK: - Dependencies
-    private let scheduleService: ScheduleService
+    private let firebase = FirebaseService.shared
     private let storage: LocalStorageService
     private let userManager = UserManager.shared
     private var cancellables = Set<AnyCancellable>()

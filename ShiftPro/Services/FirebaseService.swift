@@ -7,6 +7,7 @@
 
 import FirebaseFirestore
 import Combine
+import FirebaseAuth
 
 final class FirebaseService {
     static let shared = FirebaseService()
@@ -14,7 +15,7 @@ final class FirebaseService {
 
     private init() {}
 
-    // MARK: - Generic CRUD Operations
+    // MARK: - 通用 CRUD 操作（保留現有方法）
 
     /// 取得單一文檔
     func getDocument<T: Decodable>(
@@ -36,47 +37,11 @@ final class FirebaseService {
                 }
 
                 do {
-                    // 🔥 使用 Firestore 原生解碼器
                     let decoder = Firestore.Decoder()
                     let decodedObject = try decoder.decode(type, from: snapshot.data() ?? [:])
                     promise(.success(decodedObject))
                 } catch {
                     print("❌ Firebase 解碼錯誤: \(error)")
-                    promise(.failure(error))
-                }
-            }
-        }
-        .eraseToAnyPublisher()
-    }
-
-    /// 監聽單一文檔變化 (實時更新)
-    func documentPublisher<T: Decodable>(
-        collection: String,
-        document: String,
-        as type: T.Type
-    ) -> AnyPublisher<T?, Error> {
-        let docRef = firestore.collection(collection).document(document)
-
-        return Future<T?, Error> { promise in
-            docRef.addSnapshotListener { snapshot, error in
-                if let error = error {
-                    promise(.failure(error))
-                    return
-                }
-
-                guard let snapshot = snapshot,
-                      snapshot.exists else {
-                    promise(.success(nil))
-                    return
-                }
-
-                do {
-                    // 🔥 使用 Firestore 原生解碼器
-                    let decoder = Firestore.Decoder()
-                    let decodedObject = try decoder.decode(type, from: snapshot.data() ?? [:])
-                    promise(.success(decodedObject))
-                } catch {
-                    print("❌ Firebase 實時監聽解碼錯誤: \(error)")
                     promise(.failure(error))
                 }
             }
@@ -151,37 +116,211 @@ final class FirebaseService {
         .eraseToAnyPublisher()
     }
 
-    // MARK: - Collection Operations
+    // MARK: - 🔥 新增：合併 ScheduleService 的功能
 
-    /// 取得集合中的所有文檔
-    func getCollection<T: Decodable>(
+    /// 更新休假規則
+    func updateVacationRule(
+        orgId: String,
+        month: String,
+        type: String,
+        monthlyLimit: Int? = nil,
+        weeklyLimit: Int? = nil,
+        published: Bool = false
+    ) -> AnyPublisher<Void, Error> {
+        let docId = "\(orgId)_\(month)"
+        let now = Date()
+
+        let payload: [String: Any] = [
+            "orgId": orgId,
+            "month": month,
+            "type": type,
+            "monthlyLimit": monthlyLimit as Any,
+            "weeklyLimit": weeklyLimit as Any,
+            "published": published,
+            "createdAt": now,
+            "updatedAt": now
+        ]
+
+        return setData(
+            collection: "vacation_rules",
+            document: docId,
+            data: payload
+        )
+    }
+
+    /// 取得休假規則
+    func fetchVacationRule(orgId: String, month: String) -> AnyPublisher<FirestoreVacationRule?, Error> {
+        let docId = "\(orgId)_\(month)"
+        return getDocument(
+            collection: "vacation_rules",
+            document: docId,
+            as: FirestoreVacationRule.self
+        )
+    }
+
+    /// 刪除休假規則
+    func deleteVacationRule(orgId: String, month: String) -> AnyPublisher<Void, Error> {
+        let docId = "\(orgId)_\(month)"
+        return deleteDocument(
+            collection: "vacation_rules",
+            document: docId
+        )
+    }
+
+    /// 更新員工排班
+    func updateEmployeeSchedule(
+        orgId: String? = nil,
+        employeeId: String? = nil,
+        month: String,
+        dates: [Date]
+    ) -> AnyPublisher<Void, Error> {
+        let actualEmployeeId = employeeId ?? Auth.auth().currentUser?.uid
+        let actualOrgId = orgId ?? UserDefaults.standard.string(forKey: "orgId") ?? "demo_store_01"
+
+        guard let empId = actualEmployeeId else {
+            return Fail(error: NSError(
+                domain: "ScheduleService",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "未登入或未提供員工ID"]
+            ))
+            .eraseToAnyPublisher()
+        }
+
+        let docId = "\(actualOrgId)_\(empId)_\(month)"
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        let dateStrings = dates.map { dateFormatter.string(from: $0) }
+        let now = Date()
+
+        let payload: [String: Any] = [
+            "orgId": actualOrgId,
+            "employeeId": empId,
+            "month": month,
+            "selectedDates": dateStrings,
+            "isSubmitted": false,
+            "createdAt": now,
+            "updatedAt": now
+        ]
+
+        return setData(
+            collection: "employee_schedules",
+            document: docId,
+            data: payload
+        )
+    }
+
+    /// 提交員工排班
+    func submitEmployeeSchedule(
+        orgId: String? = nil,
+        employeeId: String? = nil,
+        month: String
+    ) -> AnyPublisher<Void, Error> {
+        let actualEmployeeId = employeeId ?? Auth.auth().currentUser?.uid
+        let actualOrgId = orgId ?? UserDefaults.standard.string(forKey: "orgId") ?? "demo_store_01"
+
+        guard let empId = actualEmployeeId else {
+            return Fail(error: NSError(
+                domain: "ScheduleService",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "未登入或未提供員工ID"]
+            ))
+            .eraseToAnyPublisher()
+        }
+
+        let docId = "\(actualOrgId)_\(empId)_\(month)"
+        let payload: [String: Any] = [
+            "isSubmitted": true,
+            "updatedAt": Date()
+        ]
+
+        return updateData(
+            collection: "employee_schedules",
+            document: docId,
+            data: payload
+        )
+    }
+
+    /// 取得員工排班資料
+    func fetchEmployeeSchedule(
+        orgId: String? = nil,
+        employeeId: String? = nil,
+        month: String
+    ) -> AnyPublisher<FirestoreEmployeeSchedule?, Error> {
+        let actualEmployeeId = employeeId ?? Auth.auth().currentUser?.uid
+        let actualOrgId = orgId ?? UserDefaults.standard.string(forKey: "orgId") ?? "demo_store_01"
+
+        guard let empId = actualEmployeeId else {
+            return Fail(error: NSError(
+                domain: "ScheduleService",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "未登入或未提供員工ID"]
+            ))
+            .eraseToAnyPublisher()
+        }
+
+        let docId = "\(actualOrgId)_\(empId)_\(month)"
+
+        return getDocument(
+            collection: "employee_schedules",
+            document: docId,
+            as: FirestoreEmployeeSchedule.self
+        )
+    }
+
+    /// 監聽員工排班變化
+    func observeEmployeeSchedule(
+        orgId: String? = nil,
+        employeeId: String? = nil,
+        month: String
+    ) -> AnyPublisher<FirestoreEmployeeSchedule?, Error> {
+        let actualEmployeeId = employeeId ?? Auth.auth().currentUser?.uid
+        let actualOrgId = orgId ?? UserDefaults.standard.string(forKey: "orgId") ?? "demo_store_01"
+
+        guard let empId = actualEmployeeId else {
+            return Fail(error: NSError(
+                domain: "ScheduleService",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "未登入或未提供員工ID"]
+            ))
+            .eraseToAnyPublisher()
+        }
+
+        let docId = "\(actualOrgId)_\(empId)_\(month)"
+
+        return documentPublisher(
+            collection: "employee_schedules",
+            document: docId,
+            as: FirestoreEmployeeSchedule.self
+        )
+    }
+
+    /// 監聽單一文檔變化 (實時更新)
+    func documentPublisher<T: Decodable>(
         collection: String,
+        document: String,
         as type: T.Type
-    ) -> AnyPublisher<[T], Error> {
-        return Future<[T], Error> { promise in
-            self.firestore.collection(collection).getDocuments { querySnapshot, error in
+    ) -> AnyPublisher<T?, Error> {
+        let docRef = firestore.collection(collection).document(document)
+
+        return Future<T?, Error> { promise in
+            docRef.addSnapshotListener { snapshot, error in
                 if let error = error {
                     promise(.failure(error))
                     return
                 }
 
-                guard let documents = querySnapshot?.documents else {
-                    promise(.success([]))
+                guard let snapshot = snapshot,
+                      snapshot.exists else {
+                    promise(.success(nil))
                     return
                 }
 
                 do {
-                    var results: [T] = []
                     let decoder = Firestore.Decoder()
-
-                    for document in documents {
-                        let decodedObject = try decoder.decode(type, from: document.data())
-                        results.append(decodedObject)
-                    }
-
-                    promise(.success(results))
+                    let decodedObject = try decoder.decode(type, from: snapshot.data() ?? [:])
+                    promise(.success(decodedObject))
                 } catch {
-                    print("❌ Firebase 集合解碼錯誤: \(error)")
+                    print("❌ Firebase 實時監聽解碼錯誤: \(error)")
                     promise(.failure(error))
                 }
             }
@@ -189,142 +328,76 @@ final class FirebaseService {
         .eraseToAnyPublisher()
     }
 
-    /// 查詢集合
-    func queryCollection<T: Decodable>(
-        collection: String,
-        field: String,
-        isEqualTo value: Any,
-        as type: T.Type
-    ) -> AnyPublisher<[T], Error> {
-        return Future<[T], Error> { promise in
-            self.firestore.collection(collection)
-                .whereField(field, isEqualTo: value)
-                .getDocuments { querySnapshot, error in
-                    if let error = error {
-                        promise(.failure(error))
-                        return
-                    }
+    // MARK: - 🔥 新增：合併 OrganizationService 的功能
 
-                    guard let documents = querySnapshot?.documents else {
-                        promise(.success([]))
-                        return
-                    }
+    /// 新增或更新組織
+    func addOrUpdateOrganization(
+        orgId: String,
+        name: String,
+        settings: [String: String]? = nil
+    ) -> AnyPublisher<Void, Error> {
+        let now = Date()
 
-                    do {
-                        var results: [T] = []
+        var payload: [String: Any] = [
+            "name": name,
+            "createdAt": now
+        ]
 
-                        for document in documents {
-                            var data = document.data()
-                            data["id"] = document.documentID  // 添加文檔 ID
-
-                            let processedData = self.convertFirebaseTimestamps(data)
-                            let jsonData = try JSONSerialization.data(withJSONObject: processedData)
-
-                            let decoder = JSONDecoder()
-                            decoder.dateDecodingStrategy = .millisecondsSince1970
-
-                            let decodedObject = try decoder.decode(type, from: jsonData)
-                            results.append(decodedObject)
-                        }
-
-                        promise(.success(results))
-                    } catch {
-                        print("❌ Firebase 查詢解碼錯誤: \(error)")
-                        promise(.failure(error))
-                    }
-                }
-        }
-        .eraseToAnyPublisher()
-    }
-
-    // MARK: - Private Helper Methods
-
-    /// 檢查類型是否需要 id 欄位
-    private func typeRequiresId<T>(_ type: T.Type) -> Bool {
-        let typeName = String(describing: type)
-        return typeName.contains("Firestore") || typeName.contains("Identifiable")
-    }
-
-    /// 將 Firebase Timestamp 轉換為時間戳（毫秒），以便 JSON 序列化
-    private func convertFirebaseTimestamps(_ data: [String: Any]) -> [String: Any] {
-        var processedData = [String: Any]()
-
-        for (key, value) in data {
-            if let timestamp = value as? Timestamp {
-                // 將 Firebase Timestamp 轉換為毫秒時間戳
-                let milliseconds = timestamp.seconds * 1000 + Int64(timestamp.nanoseconds / 1_000_000)
-                processedData[key] = milliseconds
-            } else if let nestedDict = value as? [String: Any] {
-                // 遞歸處理嵌套字典
-                processedData[key] = convertFirebaseTimestamps(nestedDict)
-            } else if let array = value as? [Any] {
-                // 處理陣列中的時間戳
-                processedData[key] = convertFirebaseTimestampsInArray(array)
-            } else {
-                // 其他類型直接保留
-                processedData[key] = value
-            }
+        if let settings = settings {
+            payload["settings"] = settings
         }
 
-        return processedData
+        return setData(
+            collection: "organizations",
+            document: orgId,
+            data: payload
+        )
     }
 
-    /// 處理陣列中的 Firebase Timestamp
-    private func convertFirebaseTimestampsInArray(_ array: [Any]) -> [Any] {
-        return array.map { element in
-            if let timestamp = element as? Timestamp {
-                // 轉換為毫秒時間戳
-                let milliseconds = timestamp.seconds * 1000 + Int64(timestamp.nanoseconds / 1_000_000)
-                return milliseconds
-            } else if let nestedDict = element as? [String: Any] {
-                return convertFirebaseTimestamps(nestedDict)
-            } else if let nestedArray = element as? [Any] {
-                return convertFirebaseTimestampsInArray(nestedArray)
-            } else {
-                return element
-            }
-        }
+    /// 取得組織資料
+    func fetchOrganization(orgId: String) -> AnyPublisher<FirestoreOrganization?, Error> {
+        return getDocument(
+            collection: "organizations",
+            document: orgId,
+            as: FirestoreOrganization.self
+        )
     }
 
-    // MARK: - Utility Methods
+    // MARK: - 🔥 新增：合併 EmployeeService 的功能
 
-    /// 檢查文檔是否存在
-    func documentExists(
-        collection: String,
-        document: String
-    ) -> AnyPublisher<Bool, Error> {
-        return Future<Bool, Error> { promise in
-            self.firestore.collection(collection).document(document).getDocument { snapshot, error in
-                if let error = error {
-                    promise(.failure(error))
-                } else {
-                    promise(.success(snapshot?.exists ?? false))
-                }
-            }
-        }
-        .eraseToAnyPublisher()
+    /// 新增或更新員工
+    func addOrUpdateEmployee(
+        orgId: String,
+        employeeId: String,
+        name: String,
+        role: String
+    ) -> AnyPublisher<Void, Error> {
+        let docId = "\(orgId)_\(employeeId)"
+        let now = Date()
+
+        let payload: [String: Any] = [
+            "orgId": orgId,
+            "employeeId": employeeId,
+            "name": name,
+            "role": role,
+            "createdAt": now,
+            "updatedAt": now
+        ]
+
+        return setData(
+            collection: "employees",
+            document: docId,
+            data: payload
+        )
     }
 
-    /// 批次寫入操作
-    func batchWrite(operations: [(collection: String, document: String, data: [String: Any])]) -> AnyPublisher<Void, Error> {
-        return Future<Void, Error> { promise in
-            let batch = self.firestore.batch()
-
-            for operation in operations {
-                let docRef = self.firestore.collection(operation.collection).document(operation.document)
-                batch.setData(operation.data, forDocument: docRef)
-            }
-
-            batch.commit { error in
-                if let error = error {
-                    print("❌ Firebase 批次寫入失敗: \(error)")
-                    promise(.failure(error))
-                } else {
-                    print("✅ Firebase 批次寫入成功")
-                    promise(.success(()))
-                }
-            }
-        }
-        .eraseToAnyPublisher()
+    /// 取得員工資料
+    func fetchEmployee(orgId: String, employeeId: String) -> AnyPublisher<FirestoreEmployee?, Error> {
+        let docId = "\(orgId)_\(employeeId)"
+        return getDocument(
+            collection: "employees",
+            document: docId,
+            as: FirestoreEmployee.self
+        )
     }
 }

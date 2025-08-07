@@ -28,7 +28,7 @@ class EmployeeCalendarViewModel: ObservableObject {
     @Published var lastSyncTime: Date?
 
     // MARK: - Dependencies
-    private let scheduleService: ScheduleService
+    private let firebase = FirebaseService.shared
     private let storage: LocalStorageService
     private let userManager = UserManager.shared
     private var cancellables = Set<AnyCancellable>()
