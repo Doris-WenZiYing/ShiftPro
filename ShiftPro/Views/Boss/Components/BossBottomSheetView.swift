@@ -126,14 +126,14 @@ struct BossBottomSheetView: View {
                         .fill(colorFromString(action.color.primary).opacity(0.1))
                         .frame(width: 50, height: 50)
 
-                    Image(systemName: action.iconName)
+                    Image(systemName: action.icon)
                         .font(.system(size: 22, weight: .semibold))
                         .foregroundColor(colorFromString(action.color.primary))
                 }
 
                 // Text content
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(action.title)
+                    Text(action.displayName)
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(isEnabled ? .primary : .secondary)
 

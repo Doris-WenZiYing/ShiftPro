@@ -8,40 +8,6 @@
 import SwiftUI
 import Network
 
-enum SyncStatus {
-    case connected
-    case disconnected
-    case syncing
-    case error
-
-    var color: Color {
-        switch self {
-        case .connected: return .green
-        case .disconnected: return .gray
-        case .syncing: return .blue
-        case .error: return .red
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .connected: return "cloud.fill"
-        case .disconnected: return "icloud.slash"
-        case .syncing: return "cloud.bolt"
-        case .error: return "exclamationmark.triangle.fill"
-        }
-    }
-
-    var text: String {
-        switch self {
-        case .connected: return "已同步"
-        case .disconnected: return "離線"
-        case .syncing: return "同步中"
-        case .error: return "同步錯誤"
-        }
-    }
-}
-
 class SyncStatusManager: ObservableObject {
     static let shared = SyncStatusManager()
 
