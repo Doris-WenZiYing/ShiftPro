@@ -27,7 +27,7 @@ struct BossSettingsView: View {
     @State private var isPublished = false
 
     @Environment(\.dismiss) private var dismiss
-    private let scheduleService = ScheduleService.shared
+    private let firebase = FirebaseService.shared
     private let userManager = UserManager.shared
 
     var body: some View {
@@ -547,13 +547,13 @@ struct BossSettingsView: View {
         }
     }
 
-    // MARK: - 🔥 優化：載入當前設定
+    // MARK: - 🔥 優化：載入當前設定 - 使用 FirebaseService
     private func loadCurrentSettings() {
         print("🔍 Boss Settings 載入當前設定...")
 
         isLoading = true
 
-        scheduleService.fetchVacationRule(
+        firebase.fetchVacationRule(
             orgId: userManager.currentOrgId,
             month: String(format: "%04d-%02d", selectedYear, selectedMonth)
         )
@@ -599,7 +599,7 @@ struct BossSettingsView: View {
         .store(in: &cancellables)
     }
 
-    // MARK: - 🔥 優化：發佈排休設定
+    // MARK: - 🔥 優化：發佈排休設定 - 使用 FirebaseService
     func publishVacationSettings() {
         print("🚀 Boss Settings 發佈排休設定...")
 
@@ -607,7 +607,7 @@ struct BossSettingsView: View {
 
         let monthString = String(format: "%04d-%02d", selectedYear, selectedMonth)
 
-        scheduleService.updateVacationRule(
+        firebase.updateVacationRule(
             orgId: userManager.currentOrgId,
             month: monthString,
             type: vacationType.rawValue,
@@ -656,7 +656,7 @@ struct BossSettingsView: View {
         .store(in: &cancellables)
     }
 
-    // MARK: - 🔥 新增：取消發佈
+    // MARK: - 🔥 新增：取消發佈 - 使用 FirebaseService
     private func unpublishVacationSettings() {
         print("🗑️ Boss Settings 取消發佈...")
 
@@ -664,7 +664,7 @@ struct BossSettingsView: View {
 
         let monthString = String(format: "%04d-%02d", selectedYear, selectedMonth)
 
-        scheduleService.deleteVacationRule(
+        firebase.deleteVacationRule(
             orgId: userManager.currentOrgId,
             month: monthString
         )

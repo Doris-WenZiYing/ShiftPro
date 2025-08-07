@@ -25,7 +25,7 @@ class BossCalendarViewModel: ObservableObject {
     @Published var lastSyncTime: Date?
     @Published var pendingPublications: Set<String> = []
 
-    // MARK: - Dependencies
+    // MARK: - Dependencies - 🔥 修復：使用 FirebaseService 替代 ScheduleService
     private let firebase = FirebaseService.shared
     private let storage: LocalStorageService
     private let userManager = UserManager.shared
@@ -60,12 +60,8 @@ class BossCalendarViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Init
-    init(
-        scheduleService: ScheduleService = .shared,
-        storage: LocalStorageService = .shared
-    ) {
-        self.scheduleService = scheduleService
+    // MARK: - Init - 🔥 修復：移除 ScheduleService 參數
+    init(storage: LocalStorageService = .shared) {
         self.storage = storage
 
         let now = Date()
@@ -170,11 +166,11 @@ class BossCalendarViewModel: ObservableObject {
         }
     }
 
-    // MARK: - 🔥 新增：Firebase 實時監聽
+    // MARK: - 🔥 新增：Firebase 實時監聽 - 🔥 修復：使用 FirebaseService
     private func setupFirebaseListener() {
         let listenerId = currentDisplayMonth
 
-        let ruleListener = scheduleService.fetchVacationRule(orgId: currentOrgId, month: currentDisplayMonth)
+        let ruleListener = firebase.fetchVacationRule(orgId: currentOrgId, month: currentDisplayMonth)
             .replaceError(with: nil)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] rule in
@@ -268,7 +264,7 @@ class BossCalendarViewModel: ObservableObject {
         print("🔇 Boss 移除所有監聽")
     }
 
-    // MARK: - 🔥 修復：排休發佈
+    // MARK: - 🔥 修復：排休發佈 - 使用 FirebaseService
     func publishVacationSetting(_ setting: VacationSetting) {
         print("🚀 Boss 發佈排休設定...")
         print("   組織: \(currentOrgId)")
@@ -284,7 +280,7 @@ class BossCalendarViewModel: ObservableObject {
         isFirebaseLoading = true
         SyncStatusManager.shared.setSyncing()
 
-        scheduleService.updateVacationRule(
+        firebase.updateVacationRule(
             orgId: currentOrgId,
             month: currentDisplayMonth,
             type: setting.type.rawValue,
@@ -292,52 +288,55 @@ class BossCalendarViewModel: ObservableObject {
             weeklyLimit: setting.type == .weekly ? setting.allowedDays : nil,
             published: true
         )
-        .sink { [weak self] completion in
-            DispatchQueue.main.async {
-                self?.isFirebaseLoading = false
-                self?.pendingPublications.remove(self?.currentDisplayMonth ?? "")
+        .sink(
+            receiveCompletion: { [weak self] completion in
+                DispatchQueue.main.async {
+                    self?.isFirebaseLoading = false
+                    self?.pendingPublications.remove(self?.currentDisplayMonth ?? "")
 
-                switch completion {
-                case .failure(let error):
-                    print("❌ Boss 發佈失敗: \(error)")
-                    SyncStatusManager.shared.setSyncError()
-                    self?.showToast("發佈失敗，請重試", type: .error)
-                    self?.isUserInitiatedAction = false
-                case .finished:
-                    break
+                    switch completion {
+                    case .failure(let error):
+                        print("❌ Boss 發佈失敗: \(error)")
+                        SyncStatusManager.shared.setSyncError()
+                        self?.showToast("發佈失敗，請重試", type: .error)
+                        self?.isUserInitiatedAction = false
+                    case .finished:
+                        break
+                    }
+                }
+            },
+            receiveValue: { [weak self] in
+                DispatchQueue.main.async {
+                    print("✅ Boss 發佈成功！")
+                    SyncStatusManager.shared.setSyncSuccess()
+
+                    // 🔥 用戶主動發佈時顯示成功訊息
+                    self?.showToast("發佈排休成功！員工現在可以開始排休了", type: .success)
+
+                    // 更新狀態記錄
+                    if let monthKey = self?.currentDisplayMonth {
+                        self?.lastKnownPublishState[monthKey] = true
+                    }
+
+                    // 發送通知
+                    NotificationCenter.default.post(
+                        name: Notification.Name("VacationRulePublished"),
+                        object: nil,
+                        userInfo: [
+                            "orgId": self?.currentOrgId ?? "",
+                            "month": self?.currentDisplayMonth ?? ""
+                        ]
+                    )
+
+                    // 強制重新載入
+                    self?.forceReloadCurrentMonth()
                 }
             }
-        } receiveValue: { [weak self] in
-            DispatchQueue.main.async {
-                print("✅ Boss 發佈成功！")
-                SyncStatusManager.shared.setSyncSuccess()
-
-                // 🔥 用戶主動發佈時顯示成功訊息
-                self?.showToast("發佈排休成功！員工現在可以開始排休了", type: .success)
-
-                // 更新狀態記錄
-                if let monthKey = self?.currentDisplayMonth {
-                    self?.lastKnownPublishState[monthKey] = true
-                }
-
-                // 發送通知
-                NotificationCenter.default.post(
-                    name: Notification.Name("VacationRulePublished"),
-                    object: nil,
-                    userInfo: [
-                        "orgId": self?.currentOrgId ?? "",
-                        "month": self?.currentDisplayMonth ?? ""
-                    ]
-                )
-
-                // 強制重新載入
-                self?.forceReloadCurrentMonth()
-            }
-        }
+        )
         .store(in: &cancellables)
     }
 
-    // MARK: - 🔥 修復：取消發佈
+    // MARK: - 🔥 修復：取消發佈 - 使用 FirebaseService
     func unpublishVacation() {
         print("🗑️ Boss 取消發佈排休...")
 
@@ -347,51 +346,54 @@ class BossCalendarViewModel: ObservableObject {
         isFirebaseLoading = true
         SyncStatusManager.shared.setSyncing()
 
-        scheduleService.deleteVacationRule(orgId: currentOrgId, month: currentDisplayMonth)
-            .sink { [weak self] completion in
-                DispatchQueue.main.async {
-                    self?.isFirebaseLoading = false
+        firebase.deleteVacationRule(orgId: currentOrgId, month: currentDisplayMonth)
+            .sink(
+                receiveCompletion: { [weak self] completion in
+                    DispatchQueue.main.async {
+                        self?.isFirebaseLoading = false
 
-                    switch completion {
-                    case .failure(let error):
-                        print("❌ Boss 取消發佈失敗: \(error)")
-                        SyncStatusManager.shared.setSyncError()
-                        self?.showToast("取消發佈失敗", type: .error)
-                        self?.isUserInitiatedAction = false
-                    case .finished:
-                        break
+                        switch completion {
+                        case .failure(let error):
+                            print("❌ Boss 取消發佈失敗: \(error)")
+                            SyncStatusManager.shared.setSyncError()
+                            self?.showToast("取消發佈失敗", type: .error)
+                            self?.isUserInitiatedAction = false
+                        case .finished:
+                            break
+                        }
+                    }
+                },
+                receiveValue: { [weak self] in
+                    DispatchQueue.main.async {
+                        print("✅ Boss 取消發佈成功")
+                        SyncStatusManager.shared.setSyncSuccess()
+                        self?.showToast("取消發佈成功", type: .warning)
+
+                        // 更新狀態記錄
+                        if let monthKey = self?.currentDisplayMonth {
+                            self?.lastKnownPublishState[monthKey] = false
+                        }
+
+                        // 發送通知
+                        NotificationCenter.default.post(
+                            name: Notification.Name("VacationRuleUnpublished"),
+                            object: nil,
+                            userInfo: [
+                                "orgId": self?.currentOrgId ?? "",
+                                "month": self?.currentDisplayMonth ?? ""
+                            ]
+                        )
+
+                        // 更新本地狀態
+                        self?.isVacationPublished = false
+                        self?.firebaseRule = nil
+                        self?.savePublishStatus()
+
+                        // 清除快取
+                        self?.dataCache.removeValue(forKey: self?.currentDisplayMonth ?? "")
                     }
                 }
-            } receiveValue: { [weak self] in
-                DispatchQueue.main.async {
-                    print("✅ Boss 取消發佈成功")
-                    SyncStatusManager.shared.setSyncSuccess()
-                    self?.showToast("取消發佈成功", type: .warning)
-
-                    // 更新狀態記錄
-                    if let monthKey = self?.currentDisplayMonth {
-                        self?.lastKnownPublishState[monthKey] = false
-                    }
-
-                    // 發送通知
-                    NotificationCenter.default.post(
-                        name: Notification.Name("VacationRuleUnpublished"),
-                        object: nil,
-                        userInfo: [
-                            "orgId": self?.currentOrgId ?? "",
-                            "month": self?.currentDisplayMonth ?? ""
-                        ]
-                    )
-
-                    // 更新本地狀態
-                    self?.isVacationPublished = false
-                    self?.firebaseRule = nil
-                    self?.savePublishStatus()
-
-                    // 清除快取
-                    self?.dataCache.removeValue(forKey: self?.currentDisplayMonth ?? "")
-                }
-            }
+            )
             .store(in: &cancellables)
     }
 

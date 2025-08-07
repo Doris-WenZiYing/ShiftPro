@@ -27,7 +27,7 @@ class EmployeeCalendarViewModel: ObservableObject {
     @Published var isFirebaseLoading = false
     @Published var lastSyncTime: Date?
 
-    // MARK: - Dependencies
+    // MARK: - Dependencies - 🔥 修復：使用 FirebaseService 替代 ScheduleService
     private let firebase = FirebaseService.shared
     private let storage: LocalStorageService
     private let userManager = UserManager.shared
@@ -70,12 +70,8 @@ class EmployeeCalendarViewModel: ObservableObject {
         return !isReallySubmitted && canEditMonth()
     }
 
-    // MARK: - Init
-    init(
-        scheduleService: ScheduleService = .shared,
-        storage: LocalStorageService = .shared
-    ) {
-        self.scheduleService = scheduleService
+    // MARK: - Init - 🔥 修復：移除 ScheduleService 參數
+    init(storage: LocalStorageService = .shared) {
         self.storage = storage
 
         let now = Date()
@@ -224,14 +220,14 @@ class EmployeeCalendarViewModel: ObservableObject {
         setupFirebaseListeners()
     }
 
-    // MARK: - 🔥 修復：Firebase 實時監聽
+    // MARK: - 🔥 修復：Firebase 實時監聽 - 使用 FirebaseService
     private func setupFirebaseListeners() {
         let listenerId = currentDisplayMonth
 
-        let rulePublisher = scheduleService.fetchVacationRule(orgId: currentOrgId, month: currentDisplayMonth)
+        let rulePublisher = firebase.fetchVacationRule(orgId: currentOrgId, month: currentDisplayMonth)
             .replaceError(with: nil)
 
-        let schedulePublisher = scheduleService.observeEmployeeSchedule(
+        let schedulePublisher = firebase.observeEmployeeSchedule(
             orgId: currentOrgId,
             employeeId: currentEmployeeId,
             month: currentDisplayMonth
@@ -386,7 +382,7 @@ class EmployeeCalendarViewModel: ObservableObject {
         }
     }
 
-    // MARK: - 🔥 優化：排休提交
+    // MARK: - 🔥 優化：排休提交 - 使用 FirebaseService
     func submitVacation() {
         print("📝 Employee 提交排休...")
 
@@ -411,7 +407,7 @@ class EmployeeCalendarViewModel: ObservableObject {
         dateFormatter.dateFormat = "yyyy-MM-dd"
         let dates = Array(vacationData.selectedDates).compactMap { dateFormatter.date(from: $0) }
 
-        scheduleService.updateEmployeeSchedule(
+        firebase.updateEmployeeSchedule(
             orgId: currentOrgId,
             employeeId: currentEmployeeId,
             month: currentDisplayMonth,
@@ -421,7 +417,7 @@ class EmployeeCalendarViewModel: ObservableObject {
             guard let self = self else {
                 return Empty<Void, Error>().eraseToAnyPublisher()
             }
-            return self.scheduleService.submitEmployeeSchedule(
+            return self.firebase.submitEmployeeSchedule(
                 orgId: self.currentOrgId,
                 employeeId: self.currentEmployeeId,
                 month: self.currentDisplayMonth
@@ -468,7 +464,7 @@ class EmployeeCalendarViewModel: ObservableObject {
         .store(in: &cancellables)
     }
 
-    // MARK: - 🔥 修復：完整清除排休資料
+    // MARK: - 🔥 修復：完整清除排休資料 - 使用 FirebaseService
     func clearAllVacationData() {
         print("🗑️ Employee 清除所有排休資料: \(currentDisplayMonth)")
 
@@ -486,8 +482,7 @@ class EmployeeCalendarViewModel: ObservableObject {
         // 3. 刪除 Firebase 資料
         let docId = "\(currentOrgId)_\(currentEmployeeId)_\(currentDisplayMonth)"
 
-        let firebaseService = FirebaseService.shared
-        firebaseService.deleteDocument(
+        firebase.deleteDocument(
             collection: "employee_schedules",
             document: docId
         )

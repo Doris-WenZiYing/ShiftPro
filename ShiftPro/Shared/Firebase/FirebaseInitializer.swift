@@ -17,9 +17,7 @@ class FirebaseInitializer: ObservableObject {
     @Published var isInitializing = false
     @Published var initializationProgress: String = ""
 
-    private init(scheduleService: ScheduleService = .shared) {
-        self.scheduleService = scheduleService
-    }
+    private init() {}
 
     // MARK: - 一鍵初始化所有測試數據
     func initializeAllTestData() {
@@ -71,9 +69,9 @@ class FirebaseInitializer: ObservableObject {
             .store(in: &cancellables)
     }
 
-    // MARK: - 建立測試組織
+    // MARK: - 建立測試組織 - 🔥 修復：使用 FirebaseService
     private func createTestOrganization() -> AnyPublisher<Void, Error> {
-        return scheduleService.addOrUpdateOrganization(
+        return firebase.addOrUpdateOrganization(
             orgId: "demo_store_01",
             name: "Demo Store",
             settings: [
@@ -88,7 +86,7 @@ class FirebaseInitializer: ObservableObject {
         .eraseToAnyPublisher()
     }
 
-    // MARK: - 建立測試員工
+    // MARK: - 建立測試員工 - 🔥 修復：使用 FirebaseService
     private func createTestEmployees() -> AnyPublisher<Void, Error> {
         let employees = [
             ("emp_001", "張小明", "正職員工"),
@@ -98,7 +96,7 @@ class FirebaseInitializer: ObservableObject {
         ]
 
         let publishers = employees.map { (id, name, role) in
-            scheduleService.addOrUpdateEmployee(
+            firebase.addOrUpdateEmployee(
                 orgId: "demo_store_01",
                 employeeId: id,
                 name: name,
@@ -115,7 +113,7 @@ class FirebaseInitializer: ObservableObject {
             .eraseToAnyPublisher()
     }
 
-    // MARK: - 建立測試休假規則
+    // MARK: - 建立測試休假規則 - 🔥 修復：使用 FirebaseService
     private func createTestVacationRules() -> AnyPublisher<Void, Error> {
         let currentDate = Date()
         let calendar = Calendar.current
@@ -130,7 +128,7 @@ class FirebaseInitializer: ObservableObject {
             let month = calendar.component(.month, from: date)
             let monthString = String(format: "%04d-%02d", year, month)
 
-            return scheduleService.updateVacationRule(
+            return firebase.updateVacationRule(
                 orgId: "demo_store_01",
                 month: monthString,
                 type: "monthly",
@@ -149,7 +147,7 @@ class FirebaseInitializer: ObservableObject {
             .eraseToAnyPublisher()
     }
 
-    // MARK: - 建立測試員工排班
+    // MARK: - 建立測試員工排班 - 🔥 修復：使用 FirebaseService
     private func createTestEmployeeSchedules() -> AnyPublisher<Void, Error> {
         let currentDate = Date()
         let calendar = Calendar.current
@@ -171,7 +169,7 @@ class FirebaseInitializer: ObservableObject {
         let publishers = scheduleData.map { (employeeId, dateStrings) in
             let dates = dateStrings.compactMap { dateFormatter.date(from: $0) }
 
-            return scheduleService.updateEmployeeSchedule(
+            return firebase.updateEmployeeSchedule(
                 orgId: "demo_store_01",
                 employeeId: employeeId,
                 month: monthString,
@@ -179,7 +177,7 @@ class FirebaseInitializer: ObservableObject {
             )
             .flatMap {
                 // 提交排班
-                self.scheduleService.submitEmployeeSchedule(
+                self.firebase.submitEmployeeSchedule(
                     orgId: "demo_store_01",
                     employeeId: employeeId,
                     month: monthString
@@ -224,12 +222,12 @@ class FirebaseInitializer: ObservableObject {
         return Just(()).eraseToAnyPublisher()
     }
 
-    // MARK: - 檢查數據完整性
+    // MARK: - 檢查數據完整性 - 🔥 修復：使用 FirebaseService
     func checkDataIntegrity() {
         print("🔍 檢查 Firebase 數據完整性...")
 
         // 檢查組織
-        scheduleService.fetchOrganization(orgId: "demo_store_01")
+        firebase.fetchOrganization(orgId: "demo_store_01")
             .sink(
                 receiveCompletion: { completion in
                     switch completion {
@@ -251,7 +249,7 @@ class FirebaseInitializer: ObservableObject {
 
         // 檢查當前月份的休假規則
         let currentMonthString = DateFormatter.yearMonthFormatter.string(from: Date())
-        scheduleService.fetchVacationRule(orgId: "demo_store_01", month: currentMonthString)
+        firebase.fetchVacationRule(orgId: "demo_store_01", month: currentMonthString)
             .sink(
                 receiveCompletion: { completion in
                     switch completion {
