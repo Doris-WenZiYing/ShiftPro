@@ -14,19 +14,19 @@ struct ContentView: View {
     @StateObject private var userManager = UserManager.shared
     @StateObject private var authService = AuthManager.shared
     @State private var showingLoginView = false
-    @State private var isInitializing = true
     @State private var showingError = false
 
-    // 🛡️ 錯誤處理
+    // 🔥 修復：錯誤處理
     @State private var cancellables = Set<AnyCancellable>()
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if isInitializing {
+            // 🔥 修復：根據初始化和認證狀態顯示不同內容
+            if userManager.isInitializing {
                 initializingView()
-            } else if !authService.isAuthenticated {
+            } else if shouldShowLoginPrompt {
                 loginPromptView()
             } else {
                 mainContentView()
@@ -36,7 +36,8 @@ struct ContentView: View {
             LoginView()
         }
         .onAppear {
-            initializeApp()
+            print("🚀 ContentView 啟動")
+            // 🔥 移除手動初始化，讓 UserManager 自行處理
         }
         .onChange(of: authService.isAuthenticated) { _, isAuthenticated in
             handleAuthenticationChange(isAuthenticated)
@@ -45,8 +46,7 @@ struct ContentView: View {
             handleRoleChange(newRole)
         }
         .errorHandling {
-            // 重試邏輯
-            initializeApp()
+            // 重試邏輯 - 如果需要的話
         }
         .onReceive(userManager.$lastError) { error in
             if error != nil {
@@ -253,17 +253,33 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - 🔧 初始化應用
+    // MARK: - 🔧 狀態邏輯
 
-    private func initializeApp() {
-        print("🚀 ContentView 初始化應用")
-
-        // 檢查 Firebase 是否已初始化
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            withAnimation(.easeInOut(duration: 0.5)) {
-                isInitializing = false
-            }
+    // 🔥 修復：更精確的登入提示判斷邏輯
+    private var shouldShowLoginPrompt: Bool {
+        // 如果還在初始化，不顯示登入提示
+        if userManager.isInitializing {
+            return false
         }
+
+        // 如果是訪客模式，不顯示登入提示
+        if userManager.isGuest {
+            return false
+        }
+
+        // 如果已登入且有用戶資料，不顯示登入提示
+        if userManager.isLoggedIn && userManager.currentUser != nil {
+            return false
+        }
+
+        // 如果 Auth 顯示已認證但 UserManager 沒有用戶資料，也不顯示登入提示
+        // 這表示正在載入用戶資料
+        if authService.isAuthenticated && userManager.currentUser == nil {
+            return false
+        }
+
+        // 其他情況顯示登入提示
+        return !authService.isAuthenticated && userManager.currentUser == nil
     }
 
     // MARK: - 🔄 處理認證狀態變化
