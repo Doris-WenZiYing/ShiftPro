@@ -13,56 +13,105 @@ final class FirebaseService {
     static let shared = FirebaseService()
     let firestore = Firestore.firestore()
 
-    private init() {}
+    private init() {
+        configureFirestore()
+    }
 
-    // MARK: - 通用 CRUD 操作（保留現有方法）
+    // MARK: - 🔧 基本配置
+    private func configureFirestore() {
+        let settings = FirestoreSettings()
+        settings.cacheSettings = MemoryCacheSettings()
+        firestore.settings = settings
 
-    /// 取得單一文檔
+        // 基本網路監聽
+        setupNetworkMonitoring()
+    }
+
+    private func setupNetworkMonitoring() {
+        // 簡單的網路狀態監聽
+        firestore.enableNetwork { [weak self] error in
+            if let error = error {
+                print("❌ Firebase 網路連線失敗: \(error)")
+                ErrorHandler.shared.handle(ShiftProError.networkConnection)
+            } else {
+                print("✅ Firebase 網路連線正常")
+            }
+        }
+    }
+
+    // MARK: - 🛡️ 安全的通用 CRUD 操作
+
+    /// 取得單一文檔（帶錯誤處理）
     func getDocument<T: Decodable>(
         collection: String,
         document: String,
         as type: T.Type
     ) -> AnyPublisher<T?, Error> {
-        return Future<T?, Error> { promise in
+        return Future<T?, Error> { [weak self] promise in
+            guard let self = self else {
+                promise(.failure(ShiftProError.unknown("Service unavailable")))
+                return
+            }
+
             self.firestore.collection(collection).document(document).getDocument { snapshot, error in
                 if let error = error {
-                    promise(.failure(error))
+                    print("❌ Firebase 讀取失敗 [\(collection)/\(document)]: \(error)")
+                    promise(.failure(self.mapFirebaseError(error)))
                     return
                 }
 
-                guard let snapshot = snapshot,
-                      snapshot.exists else {
+                guard let snapshot = snapshot else {
+                    promise(.failure(ShiftProError.dataNotFound))
+                    return
+                }
+
+                if !snapshot.exists {
                     promise(.success(nil))
                     return
                 }
 
                 do {
                     let decoder = Firestore.Decoder()
-                    let decodedObject = try decoder.decode(type, from: snapshot.data() ?? [:])
+                    var data = snapshot.data() ?? [:]
+
+                    // 確保 ID 存在於數據中
+                    if !data.keys.contains("id") {
+                        data["id"] = document
+                    }
+
+                    let decodedObject = try decoder.decode(type, from: data)
                     promise(.success(decodedObject))
                 } catch {
-                    print("❌ Firebase 解碼錯誤: \(error)")
-                    promise(.failure(error))
+                    print("❌ Firebase 解碼錯誤 [\(collection)/\(document)]: \(error)")
+                    promise(.failure(ShiftProError.invalidData))
                 }
             }
         }
         .eraseToAnyPublisher()
     }
 
-    /// 設定文檔資料
+    /// 設定文檔資料（帶錯誤處理）
     func setData(
         collection: String,
         document: String,
         data: [String: Any]
     ) -> AnyPublisher<Void, Error> {
-        return Future<Void, Error> { promise in
-            print("📤 準備寫入 Firebase: \(collection)/\(document)")
-            print("📦 資料內容: \(data)")
+        return Future<Void, Error> { [weak self] promise in
+            guard let self = self else {
+                promise(.failure(ShiftProError.unknown("Service unavailable")))
+                return
+            }
 
-            self.firestore.collection(collection).document(document).setData(data) { error in
+            print("📤 Firebase 寫入: \(collection)/\(document)")
+
+            // 添加基本元數據
+            var enrichedData = data
+            enrichedData["lastModified"] = FieldValue.serverTimestamp()
+
+            self.firestore.collection(collection).document(document).setData(enrichedData) { error in
                 if let error = error {
-                    print("❌ Firebase 寫入失敗: \(error)")
-                    promise(.failure(error))
+                    print("❌ Firebase 寫入失敗 [\(collection)/\(document)]: \(error)")
+                    promise(.failure(self.mapFirebaseError(error)))
                 } else {
                     print("✅ Firebase 寫入成功: \(collection)/\(document)")
                     promise(.success(()))
@@ -72,20 +121,28 @@ final class FirebaseService {
         .eraseToAnyPublisher()
     }
 
-    /// 更新文檔資料
+    /// 更新文檔資料（帶錯誤處理）
     func updateData(
         collection: String,
         document: String,
         data: [String: Any]
     ) -> AnyPublisher<Void, Error> {
-        return Future<Void, Error> { promise in
-            print("🔄 準備更新 Firebase: \(collection)/\(document)")
-            print("📦 更新資料: \(data)")
+        return Future<Void, Error> { [weak self] promise in
+            guard let self = self else {
+                promise(.failure(ShiftProError.unknown("Service unavailable")))
+                return
+            }
 
-            self.firestore.collection(collection).document(document).updateData(data) { error in
+            print("🔄 Firebase 更新: \(collection)/\(document)")
+
+            // 添加更新時間戳
+            var enrichedData = data
+            enrichedData["lastModified"] = FieldValue.serverTimestamp()
+
+            self.firestore.collection(collection).document(document).updateData(enrichedData) { error in
                 if let error = error {
-                    print("❌ Firebase 更新失敗: \(error)")
-                    promise(.failure(error))
+                    print("❌ Firebase 更新失敗 [\(collection)/\(document)]: \(error)")
+                    promise(.failure(self.mapFirebaseError(error)))
                 } else {
                     print("✅ Firebase 更新成功: \(collection)/\(document)")
                     promise(.success(()))
@@ -95,18 +152,23 @@ final class FirebaseService {
         .eraseToAnyPublisher()
     }
 
-    /// 刪除文檔
+    /// 刪除文檔（帶錯誤處理）
     func deleteDocument(
         collection: String,
         document: String
     ) -> AnyPublisher<Void, Error> {
-        return Future<Void, Error> { promise in
-            print("🗑️ 準備刪除 Firebase 文檔: \(collection)/\(document)")
+        return Future<Void, Error> { [weak self] promise in
+            guard let self = self else {
+                promise(.failure(ShiftProError.unknown("Service unavailable")))
+                return
+            }
+
+            print("🗑️ Firebase 刪除: \(collection)/\(document)")
 
             self.firestore.collection(collection).document(document).delete { error in
                 if let error = error {
-                    print("❌ Firebase 刪除失敗: \(error)")
-                    promise(.failure(error))
+                    print("❌ Firebase 刪除失敗 [\(collection)/\(document)]: \(error)")
+                    promise(.failure(self.mapFirebaseError(error)))
                 } else {
                     print("✅ Firebase 刪除成功: \(collection)/\(document)")
                     promise(.success(()))
@@ -116,9 +178,9 @@ final class FirebaseService {
         .eraseToAnyPublisher()
     }
 
-    // MARK: - 🔥 新增：合併 ScheduleService 的功能
+    // MARK: - 🎯 專業功能方法（穩定版）
 
-    /// 更新休假規則
+    /// 更新休假規則（穩定版）
     func updateVacationRule(
         orgId: String,
         month: String,
@@ -134,8 +196,8 @@ final class FirebaseService {
             "orgId": orgId,
             "month": month,
             "type": type,
-            "monthlyLimit": monthlyLimit as Any,
-            "weeklyLimit": weeklyLimit as Any,
+            "monthlyLimit": monthlyLimit ?? NSNull(),
+            "weeklyLimit": weeklyLimit ?? NSNull(),
             "published": published,
             "createdAt": now,
             "updatedAt": now
@@ -148,7 +210,7 @@ final class FirebaseService {
         )
     }
 
-    /// 取得休假規則
+    /// 取得休假規則（穩定版）
     func fetchVacationRule(orgId: String, month: String) -> AnyPublisher<FirestoreVacationRule?, Error> {
         let docId = "\(orgId)_\(month)"
         return getDocument(
@@ -158,7 +220,7 @@ final class FirebaseService {
         )
     }
 
-    /// 刪除休假規則
+    /// 刪除休假規則（穩定版）
     func deleteVacationRule(orgId: String, month: String) -> AnyPublisher<Void, Error> {
         let docId = "\(orgId)_\(month)"
         return deleteDocument(
@@ -167,95 +229,127 @@ final class FirebaseService {
         )
     }
 
-    /// 更新員工排班
+    /// 更新員工排班（穩定版）
     func updateEmployeeSchedule(
         orgId: String? = nil,
         employeeId: String? = nil,
         month: String,
         dates: [Date]
     ) -> AnyPublisher<Void, Error> {
-        let actualEmployeeId = employeeId ?? Auth.auth().currentUser?.uid
-        let actualOrgId = orgId ?? UserDefaults.standard.string(forKey: "orgId") ?? "demo_store_01"
+        return Future<Void, Error> { [weak self] promise in
+            guard let self = self else {
+                promise(.failure(ShiftProError.unknown("Service unavailable")))
+                return
+            }
 
-        guard let empId = actualEmployeeId else {
-            return Fail(error: NSError(
-                domain: "ScheduleService",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "未登入或未提供員工ID"]
-            ))
-            .eraseToAnyPublisher()
+            let actualEmployeeId = employeeId ?? Auth.auth().currentUser?.uid
+            let actualOrgId = orgId ?? self.getDefaultOrgId()
+
+            guard let empId = actualEmployeeId else {
+                promise(.failure(ShiftProError.authenticationFailed))
+                return
+            }
+
+            let docId = "\(actualOrgId)_\(empId)_\(month)"
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy-MM-dd"
+            let dateStrings = dates.map { dateFormatter.string(from: $0) }
+            let now = Date()
+
+            let payload: [String: Any] = [
+                "orgId": actualOrgId,
+                "employeeId": empId,
+                "month": month,
+                "selectedDates": dateStrings,
+                "isSubmitted": false,
+                "createdAt": now,
+                "updatedAt": now
+            ]
+
+            self.setData(
+                collection: "employee_schedules",
+                document: docId,
+                data: payload
+            )
+            .sink(
+                receiveCompletion: { completion in
+                    switch completion {
+                    case .failure(let error):
+                        promise(.failure(error))
+                    case .finished:
+                        break
+                    }
+                },
+                receiveValue: { _ in
+                    promise(.success(()))
+                }
+            )
+            .store(in: &self.cancellables)
         }
-
-        let docId = "\(actualOrgId)_\(empId)_\(month)"
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
-        let dateStrings = dates.map { dateFormatter.string(from: $0) }
-        let now = Date()
-
-        let payload: [String: Any] = [
-            "orgId": actualOrgId,
-            "employeeId": empId,
-            "month": month,
-            "selectedDates": dateStrings,
-            "isSubmitted": false,
-            "createdAt": now,
-            "updatedAt": now
-        ]
-
-        return setData(
-            collection: "employee_schedules",
-            document: docId,
-            data: payload
-        )
+        .eraseToAnyPublisher()
     }
 
-    /// 提交員工排班
+    /// 提交員工排班（穩定版）
     func submitEmployeeSchedule(
         orgId: String? = nil,
         employeeId: String? = nil,
         month: String
     ) -> AnyPublisher<Void, Error> {
-        let actualEmployeeId = employeeId ?? Auth.auth().currentUser?.uid
-        let actualOrgId = orgId ?? UserDefaults.standard.string(forKey: "orgId") ?? "demo_store_01"
+        return Future<Void, Error> { [weak self] promise in
+            guard let self = self else {
+                promise(.failure(ShiftProError.unknown("Service unavailable")))
+                return
+            }
 
-        guard let empId = actualEmployeeId else {
-            return Fail(error: NSError(
-                domain: "ScheduleService",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "未登入或未提供員工ID"]
-            ))
-            .eraseToAnyPublisher()
+            let actualEmployeeId = employeeId ?? Auth.auth().currentUser?.uid
+            let actualOrgId = orgId ?? self.getDefaultOrgId()
+
+            guard let empId = actualEmployeeId else {
+                promise(.failure(ShiftProError.authenticationFailed))
+                return
+            }
+
+            let docId = "\(actualOrgId)_\(empId)_\(month)"
+            let payload: [String: Any] = [
+                "isSubmitted": true,
+                "updatedAt": Date()
+            ]
+
+            self.updateData(
+                collection: "employee_schedules",
+                document: docId,
+                data: payload
+            )
+            .sink(
+                receiveCompletion: { completion in
+                    switch completion {
+                    case .failure(let error):
+                        promise(.failure(error))
+                    case .finished:
+                        break
+                    }
+                },
+                receiveValue: { _ in
+                    promise(.success(()))
+                }
+            )
+            .store(in: &self.cancellables)
         }
-
-        let docId = "\(actualOrgId)_\(empId)_\(month)"
-        let payload: [String: Any] = [
-            "isSubmitted": true,
-            "updatedAt": Date()
-        ]
-
-        return updateData(
-            collection: "employee_schedules",
-            document: docId,
-            data: payload
-        )
+        .eraseToAnyPublisher()
     }
 
-    /// 取得員工排班資料
+    /// 取得員工排班資料（穩定版）
     func fetchEmployeeSchedule(
         orgId: String? = nil,
         employeeId: String? = nil,
         month: String
     ) -> AnyPublisher<FirestoreEmployeeSchedule?, Error> {
         let actualEmployeeId = employeeId ?? Auth.auth().currentUser?.uid
-        let actualOrgId = orgId ?? UserDefaults.standard.string(forKey: "orgId") ?? "demo_store_01"
+        let actualOrgId = orgId ?? getDefaultOrgId()
 
         guard let empId = actualEmployeeId else {
-            return Fail(error: NSError(
-                domain: "ScheduleService",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "未登入或未提供員工ID"]
-            ))
-            .eraseToAnyPublisher()
+            return Fail(error: ShiftProError.authenticationFailed)
+                .eraseToAnyPublisher()
         }
 
         let docId = "\(actualOrgId)_\(empId)_\(month)"
@@ -267,22 +361,18 @@ final class FirebaseService {
         )
     }
 
-    /// 監聽員工排班變化
+    /// 監聽員工排班變化（穩定版）
     func observeEmployeeSchedule(
         orgId: String? = nil,
         employeeId: String? = nil,
         month: String
     ) -> AnyPublisher<FirestoreEmployeeSchedule?, Error> {
         let actualEmployeeId = employeeId ?? Auth.auth().currentUser?.uid
-        let actualOrgId = orgId ?? UserDefaults.standard.string(forKey: "orgId") ?? "demo_store_01"
+        let actualOrgId = orgId ?? getDefaultOrgId()
 
         guard let empId = actualEmployeeId else {
-            return Fail(error: NSError(
-                domain: "ScheduleService",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "未登入或未提供員工ID"]
-            ))
-            .eraseToAnyPublisher()
+            return Fail(error: ShiftProError.authenticationFailed)
+                .eraseToAnyPublisher()
         }
 
         let docId = "\(actualOrgId)_\(empId)_\(month)"
@@ -294,43 +384,108 @@ final class FirebaseService {
         )
     }
 
-    /// 監聽單一文檔變化 (實時更新)
+    /// 監聽單一文檔變化（穩定版）
     func documentPublisher<T: Decodable>(
         collection: String,
         document: String,
         as type: T.Type
     ) -> AnyPublisher<T?, Error> {
-        let docRef = firestore.collection(collection).document(document)
+        return Future<T?, Error> { [weak self] promise in
+            guard let self = self else {
+                promise(.failure(ShiftProError.unknown("Service unavailable")))
+                return
+            }
 
-        return Future<T?, Error> { promise in
-            docRef.addSnapshotListener { snapshot, error in
+            let docRef = self.firestore.collection(collection).document(document)
+
+            let listener = docRef.addSnapshotListener { snapshot, error in
                 if let error = error {
-                    promise(.failure(error))
+                    print("❌ Firebase 實時監聽錯誤 [\(collection)/\(document)]: \(error)")
+                    promise(.failure(self.mapFirebaseError(error)))
                     return
                 }
 
-                guard let snapshot = snapshot,
-                      snapshot.exists else {
+                guard let snapshot = snapshot else {
+                    promise(.failure(ShiftProError.dataNotFound))
+                    return
+                }
+
+                if !snapshot.exists {
                     promise(.success(nil))
                     return
                 }
 
                 do {
                     let decoder = Firestore.Decoder()
-                    let decodedObject = try decoder.decode(type, from: snapshot.data() ?? [:])
+                    var data = snapshot.data() ?? [:]
+
+                    // 確保 ID 存在於數據中
+                    if !data.keys.contains("id") {
+                        data["id"] = document
+                    }
+
+                    let decodedObject = try decoder.decode(type, from: data)
                     promise(.success(decodedObject))
                 } catch {
-                    print("❌ Firebase 實時監聽解碼錯誤: \(error)")
-                    promise(.failure(error))
+                    print("❌ Firebase 實時監聽解碼錯誤 [\(collection)/\(document)]: \(error)")
+                    promise(.failure(ShiftProError.invalidData))
                 }
             }
+
+            // 存儲監聽器以便後續清理
+            self.activeListeners["\(collection)_\(document)"] = listener
         }
         .eraseToAnyPublisher()
     }
 
-    // MARK: - 🔥 新增：合併 OrganizationService 的功能
+    // MARK: - 🔧 輔助方法
 
-    /// 新增或更新組織
+    private func getDefaultOrgId() -> String {
+        return UserDefaults.standard.string(forKey: "orgId") ?? "demo_store_01"
+    }
+
+    private func mapFirebaseError(_ error: Error) -> ShiftProError {
+        let nsError = error as NSError
+
+        switch nsError.code {
+        case -1009, -1001: // Network errors
+            return .networkConnection
+        case 7: // Permission denied
+            return .noPermission
+        case 5: // Not found
+            return .dataNotFound
+        case 16: // Unauthenticated
+            return .authenticationFailed
+        default:
+            return .firebaseError(error.localizedDescription)
+        }
+    }
+
+    // MARK: - 🧹 資源清理
+
+    private var activeListeners: [String: ListenerRegistration] = [:]
+    private var cancellables = Set<AnyCancellable>()
+
+    func removeListener(for key: String) {
+        activeListeners[key]?.remove()
+        activeListeners.removeValue(forKey: key)
+        print("🔇 移除監聽器: \(key)")
+    }
+
+    func removeAllListeners() {
+        activeListeners.values.forEach { $0.remove() }
+        activeListeners.removeAll()
+        print("🔇 移除所有監聽器")
+    }
+
+    deinit {
+        removeAllListeners()
+        cancellables.forEach { $0.cancel() }
+    }
+
+    // MARK: - 🏢 組織相關方法
+
+    /// 新增或更新組織（穩定版）
     func addOrUpdateOrganization(
         orgId: String,
         name: String,
@@ -354,7 +509,7 @@ final class FirebaseService {
         )
     }
 
-    /// 取得組織資料
+    /// 取得組織資料（穩定版）
     func fetchOrganization(orgId: String) -> AnyPublisher<FirestoreOrganization?, Error> {
         return getDocument(
             collection: "organizations",
@@ -363,9 +518,9 @@ final class FirebaseService {
         )
     }
 
-    // MARK: - 🔥 新增：合併 EmployeeService 的功能
+    // MARK: - 👥 員工相關方法
 
-    /// 新增或更新員工
+    /// 新增或更新員工（穩定版）
     func addOrUpdateEmployee(
         orgId: String,
         employeeId: String,
@@ -391,7 +546,7 @@ final class FirebaseService {
         )
     }
 
-    /// 取得員工資料
+    /// 取得員工資料（穩定版）
     func fetchEmployee(orgId: String, employeeId: String) -> AnyPublisher<FirestoreEmployee?, Error> {
         let docId = "\(orgId)_\(employeeId)"
         return getDocument(
