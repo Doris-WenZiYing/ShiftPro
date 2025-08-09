@@ -21,6 +21,8 @@ struct MoreView: View {
     @State private var isLoadingInviteCode = false
     @State private var showingRoleChangeAlert = false
     @State private var showingFirebaseInitAlert = false
+    @State private var showingErrorAlert = false
+    @State private var errorMessage = ""
 
     @State private var cancellables = Set<AnyCancellable>()
 
@@ -68,6 +70,11 @@ struct MoreView: View {
             }
         } message: {
             Text("這將在 Firebase 中建立測試數據")
+        }
+        .alert("錯誤", isPresented: $showingErrorAlert) {
+            Button("確定") { }
+        } message: {
+            Text(errorMessage)
         }
     }
 
@@ -290,8 +297,10 @@ struct MoreView: View {
             Spacer()
 
             // 邀請碼按鈕（僅老闆可見）
-            if userManager.userRole == .boss && userManager.isLoggedIn {
-                Button("邀請碼") {
+            if userManager.isLoggedIn &&
+               userManager.userRole == .boss &&
+               userManager.currentOrganization != nil {
+                Button(isLoadingInviteCode ? "載入中..." : "邀請碼") {
                     loadInviteCode()
                 }
                 .font(.system(size: 14, weight: .medium))
@@ -300,6 +309,7 @@ struct MoreView: View {
                 .padding(.vertical, 6)
                 .background(Color.green.opacity(0.2))
                 .cornerRadius(16)
+                .disabled(isLoadingInviteCode)
             }
         }
     }
@@ -666,25 +676,52 @@ struct MoreView: View {
     }
 
     private func loadInviteCode() {
-        guard userManager.isLoggedIn, userManager.userRole == .boss else { return }
+        guard userManager.isLoggedIn else {
+            print("❌ 用戶未登入，無法載入邀請碼")
+            showError("請先登入後再試")
+            return
+        }
 
+        guard userManager.userRole == .boss else {
+            print("❌ 用戶不是老闆，無法載入邀請碼")
+            showError("只有管理者可以查看邀請碼")
+            return
+        }
+
+        guard let currentOrg = userManager.currentOrganization else {
+            print("❌ 沒有組織資訊，無法載入邀請碼")
+            showError("找不到組織資訊")
+            return
+        }
+
+        print("🔑 開始載入組織邀請碼: \(currentOrg.id)")
         isLoadingInviteCode = true
 
-        orgManager.getOrganizationInviteCode(orgId: userManager.currentOrgId)
+        orgManager.getOrganizationInviteCode(orgId: currentOrg.id)
             .receive(on: DispatchQueue.main)
             .sink(
                 receiveCompletion: { completion in
                     self.isLoadingInviteCode = false
-                    if case .failure(let error) = completion {
+                    switch completion {
+                    case .failure(let error):
                         print("❌ 載入邀請碼失敗: \(error)")
+                        self.showError("載入邀請碼失敗: \(error.localizedDescription)")
+                    case .finished:
+                        break
                     }
                 },
                 receiveValue: { inviteCode in
+                    print("✅ 成功載入邀請碼: \(inviteCode)")
                     self.organizationInviteCode = inviteCode
                     self.showingInviteCodeSheet = true
                 }
             )
             .store(in: &cancellables)
+    }
+
+    private func showError(_ message: String) {
+        errorMessage = message
+        showingErrorAlert = true
     }
 
     private func performLogout() {

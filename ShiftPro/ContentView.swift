@@ -257,35 +257,52 @@ struct ContentView: View {
 
     // 🔥 修復：更精確的登入提示判斷邏輯
     private var shouldShowLoginPrompt: Bool {
-        // 如果還在初始化，不顯示登入提示
+        // 🔥 修復：首先檢查是否還在初始化
         if userManager.isInitializing {
+            print("🔄 ContentView: 用戶管理器還在初始化中")
             return false
         }
+
+        // 🔥 修復：檢查認證狀態
+        let isAuthenticated = authService.isAuthenticated
+        let isGuest = userManager.isGuest
+        let hasUserData = userManager.currentUser != nil
+
+        print("🔍 ContentView 登入狀態檢查:")
+        print("  - isAuthenticated: \(isAuthenticated)")
+        print("  - isGuest: \(isGuest)")
+        print("  - hasUserData: \(hasUserData)")
+        print("  - isInitializing: \(userManager.isInitializing)")
 
         // 如果是訪客模式，不顯示登入提示
-        if userManager.isGuest {
+        if isGuest {
+            print("👤 ContentView: 訪客模式，不顯示登入提示")
             return false
         }
 
-        // 如果已登入且有用戶資料，不顯示登入提示
-        if userManager.isLoggedIn && userManager.currentUser != nil {
+        // 如果已認證且有用戶資料，不顯示登入提示
+        if isAuthenticated && hasUserData {
+            print("✅ ContentView: 已登入且有用戶資料，不顯示登入提示")
             return false
         }
 
-        // 如果 Auth 顯示已認證但 UserManager 沒有用戶資料，也不顯示登入提示
-        // 這表示正在載入用戶資料
-        if authService.isAuthenticated && userManager.currentUser == nil {
+        // 如果已認證但沒有用戶資料，表示正在載入，不顯示登入提示
+        if isAuthenticated && !hasUserData {
+            print("🔄 ContentView: 已認證但正在載入用戶資料，不顯示登入提示")
             return false
         }
 
         // 其他情況顯示登入提示
-        return !authService.isAuthenticated && userManager.currentUser == nil
+        print("🔑 ContentView: 顯示登入提示")
+        return true
     }
 
     // MARK: - 🔄 處理認證狀態變化
 
     private func handleAuthenticationChange(_ isAuthenticated: Bool) {
         print("🔐 ContentView 認證狀態變化: \(isAuthenticated)")
+        print("  - 當前用戶: \(userManager.currentUser?.name ?? "nil")")
+        print("  - 是否訪客: \(userManager.isGuest)")
 
         withAnimation(.easeInOut(duration: 0.3)) {
             if isAuthenticated {
@@ -293,9 +310,13 @@ struct ContentView: View {
                 menuState.isMenuPresented = false
                 menuState.isVacationModeMenuPresented = false
             } else {
+                // 🔥 修復：登出時重置狀態
                 selectedTab = .calendar
                 menuState.isMenuPresented = false
                 menuState.isVacationModeMenuPresented = false
+
+                // 🔥 新增：如果需要的話，可以強制重置 AuthManager
+                // authService.forceSignOutForDevelopment()
             }
         }
     }
@@ -304,6 +325,9 @@ struct ContentView: View {
 
     private func handleRoleChange(_ newRole: UserRole) {
         print("🔄 ContentView 角色變化: \(newRole)")
+        print("  - 當前用戶: \(userManager.currentUser?.name ?? "nil")")
+        print("  - 登入狀態: \(userManager.isLoggedIn)")
+        print("  - 訪客模式: \(userManager.isGuest)")
 
         withAnimation(.easeInOut(duration: 0.3)) {
             selectedTab = .calendar
@@ -321,9 +345,12 @@ struct ContentView: View {
             .receive(on: DispatchQueue.main)
             .sink(
                 receiveCompletion: { completion in
-                    if case .failure(let error) = completion {
+                    switch completion {
+                    case .failure(let error):
                         print("❌ 進入訪客模式失敗: \(error)")
                         ErrorHandler.shared.handle(error, context: "Guest Mode")
+                    case .finished:
+                        break
                     }
                 },
                 receiveValue: { _ in

@@ -20,7 +20,6 @@ class UserManager: ObservableObject {
     @Published var isGuest: Bool = false
     @Published var lastError: ShiftProError?
 
-    // 🔥 新增：初始化狀態追蹤
     @Published var isInitializing: Bool = true
     @Published var hasCompletedInitialLoad: Bool = false
 
@@ -30,17 +29,16 @@ class UserManager: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private let userDefaults = UserDefaults.standard
 
-    // 🔥 新增：防止重複初始化
+    // 🔥 修復：防止重複初始化
     private var hasSetupAuthListener = false
+    private var isProcessingAuthChange = false
 
     private init() {
         print("👤 UserManager 初始化開始")
         setupAuthStateListener()
 
-        // 🔥 修復：延遲載入本地資料，避免與 Auth 狀態衝突
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            self.loadLocalUserDataIfNeeded()
-        }
+        // 🔥 修復：不再延遲載入本地資料，讓 Auth 狀態決定
+        // 移除本地資料載入，完全依賴 Firebase Auth 狀態
     }
 
     deinit {
@@ -72,12 +70,17 @@ class UserManager: ObservableObject {
     }
 
     private func handleAuthStateChange(_ firebaseUser: User?) {
+        // 🔥 修復：防止重複處理
+        guard !isProcessingAuthChange else { return }
+        isProcessingAuthChange = true
+
         print("🔐 UserManager Auth 狀態變化: \(firebaseUser?.email ?? "nil")")
 
         guard let user = firebaseUser else {
             print("🚪 用戶登出，清除資料")
             clearUserData()
             completeInitialization()
+            isProcessingAuthChange = false
             return
         }
 
@@ -85,104 +88,28 @@ class UserManager: ObservableObject {
             print("👤 匿名用戶，設置訪客模式")
             setupGuestMode()
             completeInitialization()
+            isProcessingAuthChange = false
         } else {
             print("✅ 正常用戶，從 Firebase 載入資料")
             loadUserFromFirebase(userId: user.uid)
+                .sink(
+                    receiveCompletion: { [weak self] completion in
+                        self?.isProcessingAuthChange = false
+                        switch completion {
+                        case .failure(let error):
+                            print("❌ 載入用戶資料失敗: \(error)")
+                            self?.handleError(error, context: "Load User Data")
+                            self?.completeInitialization()
+                        case .finished:
+                            break
+                        }
+                    },
+                    receiveValue: { [weak self] in
+                        self?.completeInitialization()
+                    }
+                )
+                .store(in: &cancellables)
         }
-    }
-
-    // MARK: - 🛡️ 註冊並創建組織（老闆）
-
-    func signUpAsBoss(email: String, password: String, name: String, orgName: String) -> AnyPublisher<Void, Error> {
-        clearError()
-        print("👑 註冊老闆: \(email)")
-
-        return authService.signUp(email: email, password: password, displayName: name)
-            .flatMap { [weak self] firebaseUser -> AnyPublisher<String, Error> in
-                guard let self = self else {
-                    return Fail<String, Error>(error: ShiftProError.unknown("UserManager unavailable")).eraseToAnyPublisher()
-                }
-                print("📝 創建組織: \(orgName)")
-                return self.orgManager.createOrganization(
-                    name: orgName,
-                    bossUserId: firebaseUser.uid,
-                    bossName: name
-                )
-            }
-            .flatMap { [weak self] inviteCode -> AnyPublisher<Void, Error> in
-                guard let self = self, let userId = Auth.auth().currentUser?.uid else {
-                    return Fail<Void, Error>(error: ShiftProError.authenticationFailed).eraseToAnyPublisher()
-                }
-                print("🔄 載入用戶資料")
-                return self.loadUserFromFirebase(userId: userId)
-            }
-            .handleEvents(
-                receiveCompletion: { [weak self] completion in
-                    if case .failure(let error) = completion {
-                        self?.handleError(error, context: "Boss SignUp")
-                    }
-                }
-            )
-            .eraseToAnyPublisher()
-    }
-
-    // MARK: - 🛡️ 註冊並加入組織（員工）
-
-    func signUpAsEmployee(email: String, password: String, name: String, inviteCode: String) -> AnyPublisher<Void, Error> {
-        clearError()
-        print("👤 註冊員工: \(email)")
-
-        return authService.signUp(email: email, password: password, displayName: name)
-            .flatMap { [weak self] firebaseUser -> AnyPublisher<FirestoreOrganization, Error> in
-                guard let self = self else {
-                    return Fail<FirestoreOrganization, Error>(error: ShiftProError.unknown("UserManager unavailable")).eraseToAnyPublisher()
-                }
-                print("🏢 加入組織: \(inviteCode)")
-                return self.orgManager.joinOrganization(
-                    inviteCode: inviteCode,
-                    employeeUserId: firebaseUser.uid,
-                    employeeName: name
-                )
-            }
-            .flatMap { [weak self] _ -> AnyPublisher<Void, Error> in
-                guard let self = self, let userId = Auth.auth().currentUser?.uid else {
-                    return Fail<Void, Error>(error: ShiftProError.authenticationFailed).eraseToAnyPublisher()
-                }
-                print("🔄 載入用戶資料")
-                return self.loadUserFromFirebase(userId: userId)
-            }
-            .handleEvents(
-                receiveCompletion: { [weak self] completion in
-                    if case .failure(let error) = completion {
-                        self?.handleError(error, context: "Employee SignUp")
-                    }
-                }
-            )
-            .eraseToAnyPublisher()
-    }
-
-    // MARK: - 🔑 登入
-
-    func signIn(email: String, password: String) -> AnyPublisher<Void, Error> {
-        clearError()
-        print("🔑 用戶登入: \(email)")
-
-        return authService.signIn(email: email, password: password)
-            .flatMap { [weak self] firebaseUser -> AnyPublisher<Void, Error> in
-                guard let self = self else {
-                    return Fail<Void, Error>(error: ShiftProError.unknown("UserManager unavailable")).eraseToAnyPublisher()
-                }
-                print("🔄 登入成功，載入用戶資料")
-                return self.loadUserFromFirebase(userId: firebaseUser.uid)
-            }
-            .handleEvents(
-                receiveCompletion: { [weak self] completion in
-                    if case .failure(let error) = completion {
-                        self?.handleError(error, context: "Sign In")
-                    }
-                }
-            )
-            .eraseToAnyPublisher()
     }
 
     // MARK: - 🔄 從 Firebase 載入用戶資料
@@ -199,14 +126,12 @@ class UserManager: ObservableObject {
                         organization: organization,
                         role: role
                     )
-                    self?.completeInitialization()
                 }
             })
             .map { _ in () }
             .catch { [weak self] error -> AnyPublisher<Void, Error> in
                 print("❌ 載入用戶資料失敗: \(error)")
                 self?.handleError(error, context: "Load User from Firebase")
-                self?.completeInitialization()
                 return Just(()).setFailureType(to: Error.self).eraseToAnyPublisher()
             }
             .eraseToAnyPublisher()
@@ -246,7 +171,8 @@ class UserManager: ObservableObject {
         isLoggedIn = true
         isGuest = false
 
-        saveUserToLocal()
+        // 🔥 修復：不再保存到本地，完全依賴 Firebase
+        // saveUserToLocal() - 移除
 
         print("✅ 用戶資料更新完成: \(userProfile.name) (\(role.rawValue))")
     }
@@ -275,7 +201,6 @@ class UserManager: ObservableObject {
         isLoggedIn = false
         isGuest = true
 
-        saveUserToLocal()
         print("👤 訪客模式設置完成")
     }
 
@@ -292,10 +217,6 @@ class UserManager: ObservableObject {
                     if case .failure(let error) = completion {
                         self?.handleError(error, context: "Enter Guest Mode")
                     }
-                },
-                receiveCancel: { [weak self] in
-                    print("✅ 訪客模式登入成功")
-                    self?.completeInitialization()
                 }
             )
             .eraseToAnyPublisher()
@@ -333,11 +254,122 @@ class UserManager: ObservableObject {
         userRole = .employee
         isGuest = false
 
-        clearLocalUserData()
+        // 🔥 修復：完全清除本地資料
+        clearAllLocalData()
         print("🗑️ 用戶資料已清除")
     }
 
-    // MARK: - 🔧 舊版相容性方法（測試用）
+    // MARK: - 💾 本地存儲（完全移除，改為開發測試用）
+
+    private func clearAllLocalData() {
+        let keys = ["currentUser", "currentOrganization", "userRole", "isGuest", "isLoggedIn"]
+        keys.forEach { userDefaults.removeObject(forKey: $0) }
+        print("🗑️ 本地用戶資料已清除")
+    }
+
+    // MARK: - 🔧 初始化完成管理
+
+    private func completeInitialization() {
+        DispatchQueue.main.async {
+            if !self.hasCompletedInitialLoad {
+                self.hasCompletedInitialLoad = true
+                self.isInitializing = false
+                print("✅ UserManager 初始化完成")
+            }
+        }
+    }
+
+    // MARK: - 🛡️ 註冊方法（保持不變）
+
+    func signUpAsBoss(email: String, password: String, name: String, orgName: String) -> AnyPublisher<Void, Error> {
+        clearError()
+        print("👑 註冊老闆: \(email)")
+
+        return authService.signUp(email: email, password: password, displayName: name)
+            .flatMap { [weak self] firebaseUser -> AnyPublisher<String, Error> in
+                guard let self = self else {
+                    return Fail<String, Error>(error: ShiftProError.unknown("UserManager unavailable")).eraseToAnyPublisher()
+                }
+                print("📝 創建組織: \(orgName)")
+                return self.orgManager.createOrganization(
+                    name: orgName,
+                    bossUserId: firebaseUser.uid,
+                    bossName: name
+                )
+            }
+            .flatMap { [weak self] inviteCode -> AnyPublisher<Void, Error> in
+                guard let self = self, let userId = Auth.auth().currentUser?.uid else {
+                    return Fail<Void, Error>(error: ShiftProError.authenticationFailed).eraseToAnyPublisher()
+                }
+                print("🔄 載入用戶資料")
+                return self.loadUserFromFirebase(userId: userId)
+            }
+            .handleEvents(
+                receiveCompletion: { [weak self] completion in
+                    if case .failure(let error) = completion {
+                        self?.handleError(error, context: "Boss SignUp")
+                    }
+                }
+            )
+            .eraseToAnyPublisher()
+    }
+
+    func signUpAsEmployee(email: String, password: String, name: String, inviteCode: String) -> AnyPublisher<Void, Error> {
+        clearError()
+        print("👤 註冊員工: \(email)")
+
+        return authService.signUp(email: email, password: password, displayName: name)
+            .flatMap { [weak self] firebaseUser -> AnyPublisher<FirestoreOrganization, Error> in
+                guard let self = self else {
+                    return Fail<FirestoreOrganization, Error>(error: ShiftProError.unknown("UserManager unavailable")).eraseToAnyPublisher()
+                }
+                print("🏢 加入組織: \(inviteCode)")
+                return self.orgManager.joinOrganization(
+                    inviteCode: inviteCode,
+                    employeeUserId: firebaseUser.uid,
+                    employeeName: name
+                )
+            }
+            .flatMap { [weak self] _ -> AnyPublisher<Void, Error> in
+                guard let self = self, let userId = Auth.auth().currentUser?.uid else {
+                    return Fail<Void, Error>(error: ShiftProError.authenticationFailed).eraseToAnyPublisher()
+                }
+                print("🔄 載入用戶資料")
+                return self.loadUserFromFirebase(userId: userId)
+            }
+            .handleEvents(
+                receiveCompletion: { [weak self] completion in
+                    if case .failure(let error) = completion {
+                        self?.handleError(error, context: "Employee SignUp")
+                    }
+                }
+            )
+            .eraseToAnyPublisher()
+    }
+
+    func signIn(email: String, password: String) -> AnyPublisher<Void, Error> {
+        clearError()
+        print("🔑 用戶登入: \(email)")
+
+        return authService.signIn(email: email, password: password)
+            .flatMap { [weak self] firebaseUser -> AnyPublisher<Void, Error> in
+                guard let self = self else {
+                    return Fail<Void, Error>(error: ShiftProError.unknown("UserManager unavailable")).eraseToAnyPublisher()
+                }
+                print("🔄 登入成功，載入用戶資料")
+                return self.loadUserFromFirebase(userId: firebaseUser.uid)
+            }
+            .handleEvents(
+                receiveCompletion: { [weak self] completion in
+                    if case .failure(let error) = completion {
+                        self?.handleError(error, context: "Sign In")
+                    }
+                }
+            )
+            .eraseToAnyPublisher()
+    }
+
+    // MARK: - 🔧 測試方法（僅在訪客模式下可用）
 
     func setCurrentBoss(orgId: String, bossName: String, orgName: String) {
         guard isGuest else {
@@ -364,7 +396,6 @@ class UserManager: ObservableObject {
         currentOrganization = org
         userRole = .boss
 
-        saveUserToLocal()
         print("👑 設定測試老闆身分: \(bossName)")
     }
 
@@ -393,7 +424,6 @@ class UserManager: ObservableObject {
         currentOrganization = org
         userRole = .employee
 
-        saveUserToLocal()
         print("👤 設定測試員工身分: \(employeeName)")
     }
 
@@ -426,7 +456,7 @@ class UserManager: ObservableObject {
         print("🔄 身分切換完成: \(userRole.rawValue)")
     }
 
-    // MARK: - 📊 Computed Properties
+    // MARK: - 📊 Computed Properties（保持不變）
 
     var displayName: String {
         currentUser?.name ?? "訪客"
@@ -465,89 +495,6 @@ class UserManager: ObservableObject {
             return "已登入"
         } else {
             return "未登入"
-        }
-    }
-
-    // MARK: - 💾 本地存儲
-
-    private func saveUserToLocal() {
-        do {
-            if let user = currentUser {
-                let userData = try JSONEncoder().encode(user)
-                userDefaults.set(userData, forKey: "currentUser")
-            }
-
-            if let org = currentOrganization {
-                let orgData = try JSONEncoder().encode(org)
-                userDefaults.set(orgData, forKey: "currentOrganization")
-            }
-
-            userDefaults.set(userRole.rawValue, forKey: "userRole")
-            userDefaults.set(isGuest, forKey: "isGuest")
-            userDefaults.set(isLoggedIn, forKey: "isLoggedIn")
-
-            print("💾 用戶資料已保存到本地")
-        } catch {
-            print("❌ 保存用戶資料失敗: \(error)")
-        }
-    }
-
-    // 🔥 修復：避免與 Auth 狀態衝突的本地資料載入
-    private func loadLocalUserDataIfNeeded() {
-        // 只有在沒有 Firebase 用戶時才載入本地資料
-        guard Auth.auth().currentUser == nil else {
-            print("🔒 有 Firebase 用戶，跳過本地資料載入")
-            return
-        }
-
-        do {
-            var hasLocalData = false
-
-            if let userData = userDefaults.data(forKey: "currentUser") {
-                currentUser = try JSONDecoder().decode(UserProfile.self, from: userData)
-                hasLocalData = true
-            }
-
-            if let orgData = userDefaults.data(forKey: "currentOrganization") {
-                currentOrganization = try JSONDecoder().decode(OrganizationProfile.self, from: orgData)
-                hasLocalData = true
-            }
-
-            if let roleString = userDefaults.string(forKey: "userRole") {
-                userRole = UserRole(rawValue: roleString) ?? .employee
-                hasLocalData = true
-            }
-
-            isGuest = userDefaults.bool(forKey: "isGuest")
-            isLoggedIn = userDefaults.bool(forKey: "isLoggedIn")
-
-            if hasLocalData {
-                print("📱 載入本地用戶資料完成")
-            }
-
-            completeInitialization()
-        } catch {
-            print("❌ 載入本地用戶資料失敗: \(error)")
-            clearLocalUserData()
-            completeInitialization()
-        }
-    }
-
-    private func clearLocalUserData() {
-        let keys = ["currentUser", "currentOrganization", "userRole", "isGuest", "isLoggedIn"]
-        keys.forEach { userDefaults.removeObject(forKey: $0) }
-        print("🗑️ 本地用戶資料已清除")
-    }
-
-    // MARK: - 🔧 初始化完成管理
-
-    private func completeInitialization() {
-        DispatchQueue.main.async {
-            if !self.hasCompletedInitialLoad {
-                self.hasCompletedInitialLoad = true
-                self.isInitializing = false
-                print("✅ UserManager 初始化完成")
-            }
         }
     }
 

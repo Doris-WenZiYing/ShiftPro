@@ -36,6 +36,7 @@ class AuthManager: ObservableObject {
     // MARK: - 🔧 初始化和狀態管理
 
     private func setupAuthStateListener() {
+        // 🔥 修復：參數順序錯誤
         authStateListener = Auth.auth().addStateDidChangeListener { [weak self] _, user in
             DispatchQueue.main.async {
                 self?.handleAuthStateChange(user: user)
@@ -58,6 +59,55 @@ class AuthManager: ObservableObject {
         } else {
             print("🔓 用戶已登出")
         }
+    }
+
+    // MARK: - 🔄 登出（修復版本 - 完全清除）
+
+    func signOut() -> AnyPublisher<Void, Error> {
+        clearError()
+
+        return Future<Void, Error> { [weak self] promise in
+            do {
+                try Auth.auth().signOut()
+                print("✅ Firebase Auth 登出成功")
+
+                // 🔥 修復：完全清除認證狀態
+                self?.forceSignOut()
+                promise(.success(()))
+            } catch {
+                let shiftProError = self?.mapAuthError(error) ?? ShiftProError.unknown("登出失敗")
+                self?.lastError = shiftProError
+                print("❌ 登出失敗: \(error)")
+                promise(.failure(shiftProError))
+            }
+        }
+        .eraseToAnyPublisher()
+    }
+
+    // 🔥 新增：強制清除所有認證狀態
+    private func forceSignOut() {
+        currentUser = nil
+        isAuthenticated = false
+        lastError = nil
+
+        // 清除任何可能的快取
+        DispatchQueue.main.async {
+            self.objectWillChange.send()
+        }
+
+        print("🔥 強制清除認證狀態完成")
+    }
+
+    // 🔥 新增：開發用 - 完全重置認證狀態
+    func forceSignOutForDevelopment() {
+        do {
+            try Auth.auth().signOut()
+        } catch {
+            print("⚠️ 強制登出時發生錯誤: \(error)")
+        }
+
+        forceSignOut()
+        print("🔧 開發模式：強制重置認證狀態")
     }
 
     // MARK: - 🛡️ 註冊（帶錯誤處理）
@@ -169,26 +219,6 @@ class AuthManager: ObservableObject {
                     print("✅ 登入成功: \(user.email ?? "")")
                     promise(.success(user))
                 }
-            }
-        }
-        .eraseToAnyPublisher()
-    }
-
-    // MARK: - 🚪 登出（帶錯誤處理）
-
-    func signOut() -> AnyPublisher<Void, Error> {
-        clearError()
-
-        return Future<Void, Error> { [weak self] promise in
-            do {
-                try Auth.auth().signOut()
-                print("✅ 登出成功")
-                promise(.success(()))
-            } catch {
-                let shiftProError = self?.mapAuthError(error) ?? ShiftProError.unknown("登出失敗")
-                self?.lastError = shiftProError
-                print("❌ 登出失敗: \(error)")
-                promise(.failure(shiftProError))
             }
         }
         .eraseToAnyPublisher()
@@ -321,23 +351,5 @@ class AuthManager: ObservableObject {
 
     var currentUserId: String? {
         return currentUser?.uid
-    }
-}
-
-// MARK: - 🚨 舊版錯誤類型（向後相容）
-enum AuthError: Error, LocalizedError {
-    case unknownError
-    case userNotFound
-    case invalidCredentials
-
-    var errorDescription: String? {
-        switch self {
-        case .unknownError:
-            return "未知錯誤"
-        case .userNotFound:
-            return "用戶不存在"
-        case .invalidCredentials:
-            return "登入資訊錯誤"
-        }
     }
 }

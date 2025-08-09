@@ -379,6 +379,46 @@ struct EmployeeCalendarView: View {
     private func getStatusInfo(for month: CalendarMonth) -> [CalendarMonthTitle.StatusInfo] {
         let monthKey = String(format: "%04d-%02d", month.year, month.month)
 
+        // 🔥 修復：檢查登入狀態
+        let userManager = UserManager.shared
+        let authService = AuthManager.shared
+
+        // 如果用戶未登入且不是訪客模式，顯示未登入狀態
+        if !authService.isAuthenticated && !userManager.isGuest {
+            return [
+                .init(
+                    title: "登入狀態",
+                    status: "未登入",
+                    color: .gray,
+                    icon: "person.slash"
+                ),
+                .init(
+                    title: "排休狀態",
+                    status: "需要登入",
+                    color: .gray,
+                    icon: "lock.fill"
+                )
+            ]
+        }
+
+        // 如果是訪客模式，顯示訪客狀態
+        if userManager.isGuest {
+            return [
+                .init(
+                    title: "模式",
+                    status: "訪客體驗",
+                    color: .orange,
+                    icon: "person.crop.circle.dashed"
+                ),
+                .init(
+                    title: "排休狀態",
+                    status: "測試模式",
+                    color: .orange,
+                    icon: "calendar.badge.checkmark"
+                )
+            ]
+        }
+
         guard monthKey == viewModel.currentDisplayMonth else {
             return [
                 .init(
