@@ -21,22 +21,30 @@ class AuthManager: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var authStateListener: AuthStateDidChangeListenerHandle?
 
+    // MARK: - 🔧 Configuration
+    private struct Config {
+        static let forceLogoutOnInit = true
+        static let userDefaultsKeys = [
+            "currentUser", "currentOrganization", "userRole",
+            "isGuest", "isLoggedIn", "orgId"
+        ]
+        static let dataKeyPrefixes = ["VacationData_", "VacationLimits_"]
+    }
+
     init() {
+        if Config.forceLogoutOnInit {
+            performForceLogout(clearUserDefaults: true)
+        }
         setupAuthStateListener()
-        checkInitialAuthState()
     }
 
     deinit {
-        if let listener = authStateListener {
-            Auth.auth().removeStateDidChangeListener(listener)
-        }
-        cancellables.forEach { $0.cancel() }
+        cleanup()
     }
 
     // MARK: - 🔧 初始化和狀態管理
 
     private func setupAuthStateListener() {
-        // 🔥 修復：參數順序錯誤
         authStateListener = Auth.auth().addStateDidChangeListener { [weak self] _, user in
             DispatchQueue.main.async {
                 self?.handleAuthStateChange(user: user)
@@ -44,16 +52,14 @@ class AuthManager: ObservableObject {
         }
     }
 
-    private func checkInitialAuthState() {
-        DispatchQueue.main.async {
-            self.handleAuthStateChange(user: Auth.auth().currentUser)
-        }
-    }
-
     private func handleAuthStateChange(user: User?) {
         currentUser = user
         isAuthenticated = user != nil
 
+        logAuthState(user: user)
+    }
+
+    private func logAuthState(user: User?) {
         if let user = user {
             print("✅ 用戶已登入: \(user.email ?? "匿名用戶")")
         } else {
@@ -61,7 +67,7 @@ class AuthManager: ObservableObject {
         }
     }
 
-    // MARK: - 🔄 登出（修復版本 - 完全清除）
+    // MARK: - 🔄 登出系統
 
     func signOut() -> AnyPublisher<Void, Error> {
         clearError()
@@ -71,8 +77,7 @@ class AuthManager: ObservableObject {
                 try Auth.auth().signOut()
                 print("✅ Firebase Auth 登出成功")
 
-                // 🔥 修復：完全清除認證狀態
-                self?.forceSignOut()
+                self?.clearAuthState()
                 promise(.success(()))
             } catch {
                 let shiftProError = self?.mapAuthError(error) ?? ShiftProError.unknown("登出失敗")
@@ -84,50 +89,84 @@ class AuthManager: ObservableObject {
         .eraseToAnyPublisher()
     }
 
-    // 🔥 新增：強制清除所有認證狀態
-    private func forceSignOut() {
+    // 🔥 統一的強制登出方法
+    private func performForceLogout(clearUserDefaults: Bool = false) {
+        do {
+            try Auth.auth().signOut()
+            print("🔥 強制登出成功")
+        } catch {
+            print("⚠️ 強制登出失敗: \(error)")
+        }
+
+        clearAuthState()
+
+        if clearUserDefaults {
+            clearAllUserData()
+        }
+    }
+
+    // 🔥 統一的認證狀態清除
+    private func clearAuthState() {
         currentUser = nil
         isAuthenticated = false
         lastError = nil
 
-        // 清除任何可能的快取
         DispatchQueue.main.async {
             self.objectWillChange.send()
         }
-
-        print("🔥 強制清除認證狀態完成")
     }
 
-    // 🔥 新增：開發用 - 完全重置認證狀態
-    func forceSignOutForDevelopment() {
-        do {
-            try Auth.auth().signOut()
-        } catch {
-            print("⚠️ 強制登出時發生錯誤: \(error)")
+    // 🔥 統一的用戶資料清除
+    private func clearAllUserData() {
+        let userDefaults = UserDefaults.standard
+
+        // 清除指定的 keys
+        Config.userDefaultsKeys.forEach { key in
+            userDefaults.removeObject(forKey: key)
         }
 
-        forceSignOut()
+        // 清除帶前綴的資料
+        let allKeys = Array(userDefaults.dictionaryRepresentation().keys)
+        allKeys.forEach { key in
+            if Config.dataKeyPrefixes.contains(where: { key.hasPrefix($0) }) {
+                userDefaults.removeObject(forKey: key)
+            }
+        }
+
+        print("🗑️ 清除所有本地用戶資料")
+    }
+
+    // 🔥 開發用方法（簡化）
+    func forceSignOutForDevelopment() {
+        performForceLogout(clearUserDefaults: true)
         print("🔧 開發模式：強制重置認證狀態")
     }
 
-    // MARK: - 🛡️ 註冊（帶錯誤處理）
+    // MARK: - 🛡️ 註冊
 
     func signUp(email: String, password: String, displayName: String) -> AnyPublisher<User, Error> {
-        guard isValidEmail(email) else {
-            return Fail(error: ShiftProError.validationFailed("電子郵件格式不正確"))
-                .eraseToAnyPublisher()
+        // 🔥 統一的驗證邏輯
+        if let validationError = validateSignUpInput(email: email, password: password, displayName: displayName) {
+            return Fail(error: validationError).eraseToAnyPublisher()
         }
 
-        guard isValidPassword(password) else {
-            return Fail(error: ShiftProError.validationFailed("密碼必須至少6個字符"))
-                .eraseToAnyPublisher()
-        }
+        return performSignUp(email: email, password: password, displayName: displayName)
+    }
 
-        guard !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return Fail(error: ShiftProError.validationFailed("請輸入顯示名稱"))
-                .eraseToAnyPublisher()
+    private func validateSignUpInput(email: String, password: String, displayName: String) -> ShiftProError? {
+        if !isValidEmail(email) {
+            return .validationFailed("電子郵件格式不正確")
         }
+        if !isValidPassword(password) {
+            return .validationFailed("密碼必須至少6個字符")
+        }
+        if displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .validationFailed("請輸入顯示名稱")
+        }
+        return nil
+    }
 
+    private func performSignUp(email: String, password: String, displayName: String) -> AnyPublisher<User, Error> {
         isLoading = true
         clearError()
 
@@ -140,54 +179,73 @@ class AuthManager: ObservableObject {
             Auth.auth().createUser(withEmail: email, password: password) { [weak self] result, error in
                 DispatchQueue.main.async {
                     self?.isLoading = false
-
-                    if let error = error {
-                        let shiftProError = self?.mapAuthError(error) ?? ShiftProError.authenticationFailed
-                        self?.lastError = shiftProError
-                        print("❌ 註冊失敗: \(error.localizedDescription)")
-                        promise(.failure(shiftProError))
-                        return
-                    }
-
-                    guard let user = result?.user else {
-                        let unknownError = ShiftProError.unknown("註冊後無法取得用戶資訊")
-                        self?.lastError = unknownError
-                        promise(.failure(unknownError))
-                        return
-                    }
-
-                    // 更新顯示名稱
-                    let changeRequest = user.createProfileChangeRequest()
-                    changeRequest.displayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-                    changeRequest.commitChanges { error in
-                        if let error = error {
-                            print("⚠️ 更新顯示名稱失敗: \(error)")
-                        } else {
-                            print("✅ 顯示名稱更新成功")
-                        }
-                    }
-
-                    print("✅ 註冊成功: \(user.email ?? "")")
-                    promise(.success(user))
+                    self?.handleSignUpResult(result: result, error: error, displayName: displayName, promise: promise)
                 }
             }
         }
         .eraseToAnyPublisher()
     }
 
-    // MARK: - 🔑 登入（帶錯誤處理）
+    private func handleSignUpResult(
+        result: AuthDataResult?,
+        error: Error?,
+        displayName: String,
+        promise: @escaping (Result<User, Error>) -> Void
+    ) {
+        if let error = error {
+            let shiftProError = mapAuthError(error)
+            lastError = shiftProError
+            print("❌ 註冊失敗: \(error.localizedDescription)")
+            promise(.failure(shiftProError))
+            return
+        }
+
+        guard let user = result?.user else {
+            let unknownError = ShiftProError.unknown("註冊後無法取得用戶資訊")
+            lastError = unknownError
+            promise(.failure(unknownError))
+            return
+        }
+
+        updateUserDisplayName(user: user, displayName: displayName)
+        print("✅ 註冊成功: \(user.email ?? "")")
+        promise(.success(user))
+    }
+
+    private func updateUserDisplayName(user: User, displayName: String) {
+        let changeRequest = user.createProfileChangeRequest()
+        changeRequest.displayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        changeRequest.commitChanges { error in
+            if let error = error {
+                print("⚠️ 更新顯示名稱失敗: \(error)")
+            } else {
+                print("✅ 顯示名稱更新成功")
+            }
+        }
+    }
+
+    // MARK: - 🔑 登入
 
     func signIn(email: String, password: String) -> AnyPublisher<User, Error> {
-        guard isValidEmail(email) else {
-            return Fail(error: ShiftProError.validationFailed("電子郵件格式不正確"))
-                .eraseToAnyPublisher()
+        // 🔥 統一的驗證邏輯
+        if let validationError = validateSignInInput(email: email, password: password) {
+            return Fail(error: validationError).eraseToAnyPublisher()
         }
 
-        guard !password.isEmpty else {
-            return Fail(error: ShiftProError.validationFailed("請輸入密碼"))
-                .eraseToAnyPublisher()
-        }
+        return performSignIn(email: email, password: password)
+    }
 
+    private func validateSignInInput(email: String, password: String) -> ShiftProError? {
+        if !isValidEmail(email) {
+            return .validationFailed("電子郵件格式不正確")
+        }
+        if password.isEmpty {
+            return .validationFailed("請輸入密碼")
+        }
+        return nil
+    }
+
+    private func performSignIn(email: String, password: String) -> AnyPublisher<User, Error> {
         isLoading = true
         clearError()
 
@@ -200,31 +258,38 @@ class AuthManager: ObservableObject {
             Auth.auth().signIn(withEmail: email, password: password) { [weak self] result, error in
                 DispatchQueue.main.async {
                     self?.isLoading = false
-
-                    if let error = error {
-                        let shiftProError = self?.mapAuthError(error) ?? ShiftProError.authenticationFailed
-                        self?.lastError = shiftProError
-                        print("❌ 登入失敗: \(error.localizedDescription)")
-                        promise(.failure(shiftProError))
-                        return
-                    }
-
-                    guard let user = result?.user else {
-                        let unknownError = ShiftProError.unknown("登入後無法取得用戶資訊")
-                        self?.lastError = unknownError
-                        promise(.failure(unknownError))
-                        return
-                    }
-
-                    print("✅ 登入成功: \(user.email ?? "")")
-                    promise(.success(user))
+                    self?.handleSignInResult(result: result, error: error, promise: promise)
                 }
             }
         }
         .eraseToAnyPublisher()
     }
 
-    // MARK: - 👤 匿名登入（訪客模式）
+    private func handleSignInResult(
+        result: AuthDataResult?,
+        error: Error?,
+        promise: @escaping (Result<User, Error>) -> Void
+    ) {
+        if let error = error {
+            let shiftProError = mapAuthError(error)
+            lastError = shiftProError
+            print("❌ 登入失敗: \(error.localizedDescription)")
+            promise(.failure(shiftProError))
+            return
+        }
+
+        guard let user = result?.user else {
+            let unknownError = ShiftProError.unknown("登入後無法取得用戶資訊")
+            lastError = unknownError
+            promise(.failure(unknownError))
+            return
+        }
+
+        print("✅ 登入成功: \(user.email ?? "")")
+        promise(.success(user))
+    }
+
+    // MARK: - 👤 匿名登入
 
     func signInAnonymously() -> AnyPublisher<User, Error> {
         isLoading = true
@@ -239,28 +304,35 @@ class AuthManager: ObservableObject {
             Auth.auth().signInAnonymously { [weak self] result, error in
                 DispatchQueue.main.async {
                     self?.isLoading = false
-
-                    if let error = error {
-                        let shiftProError = self?.mapAuthError(error) ?? ShiftProError.authenticationFailed
-                        self?.lastError = shiftProError
-                        print("❌ 匿名登入失敗: \(error.localizedDescription)")
-                        promise(.failure(shiftProError))
-                        return
-                    }
-
-                    guard let user = result?.user else {
-                        let unknownError = ShiftProError.unknown("匿名登入後無法取得用戶資訊")
-                        self?.lastError = unknownError
-                        promise(.failure(unknownError))
-                        return
-                    }
-
-                    print("✅ 匿名登入成功")
-                    promise(.success(user))
+                    self?.handleAnonymousSignInResult(result: result, error: error, promise: promise)
                 }
             }
         }
         .eraseToAnyPublisher()
+    }
+
+    private func handleAnonymousSignInResult(
+        result: AuthDataResult?,
+        error: Error?,
+        promise: @escaping (Result<User, Error>) -> Void
+    ) {
+        if let error = error {
+            let shiftProError = mapAuthError(error)
+            lastError = shiftProError
+            print("❌ 匿名登入失敗: \(error.localizedDescription)")
+            promise(.failure(shiftProError))
+            return
+        }
+
+        guard let user = result?.user else {
+            let unknownError = ShiftProError.unknown("匿名登入後無法取得用戶資訊")
+            lastError = unknownError
+            promise(.failure(unknownError))
+            return
+        }
+
+        print("✅ 匿名登入成功")
+        promise(.success(user))
     }
 
     // MARK: - 🔄 密碼重設
@@ -307,6 +379,13 @@ class AuthManager: ObservableObject {
 
     private func clearError() {
         lastError = nil
+    }
+
+    private func cleanup() {
+        if let listener = authStateListener {
+            Auth.auth().removeStateDidChangeListener(listener)
+        }
+        cancellables.forEach { $0.cancel() }
     }
 
     /// 將 Firebase Auth 錯誤映射為 ShiftProError
