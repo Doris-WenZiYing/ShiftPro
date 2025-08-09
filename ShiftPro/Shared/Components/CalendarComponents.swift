@@ -97,7 +97,7 @@ struct CalendarCell: View {
     let state: CellState
     let action: () -> Void
 
-    enum CellState {
+    enum CellState: Equatable {
         case normal
         case selected
         case vacationSelected
@@ -338,7 +338,7 @@ struct CalendarActionBar: View {
     let onSecondaryAction: (() -> Void)?
     let onTertiaryAction: (() -> Void)?
 
-    enum ActionBarMode {
+    enum ActionBarMode: Equatable {
         case edit(hasSelection: Bool)
         case submit
         case view
@@ -458,5 +458,150 @@ struct CalendarStatistics: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: stats.count)
+    }
+}
+
+// MARK: - Menu List Item Component
+struct MenuListItem: View {
+    let icon: String
+    let title: String
+    let subtitle: String?
+    let action: () -> Void
+
+    init(icon: String, title: String, subtitle: String? = nil, action: @escaping () -> Void) {
+        self.icon = icon
+        self.title = title
+        self.subtitle = subtitle
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 16) {
+                Image(systemName: icon)
+                    .font(.system(size: 20))
+                    .foregroundColor(.white)
+                    .frame(width: 32)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 17))
+                        .foregroundColor(.white)
+
+                    if let subtitle = subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 14))
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 16)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+// MARK: - Vacation Mode Card Component
+struct VacationModeCard: View {
+    let mode: VacationMode
+    let isSelected: Bool
+    let weeklyLimit: Int
+    let monthlyLimit: Int
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 16) {
+                // Icon
+                ZStack {
+                    Circle()
+                        .fill(isSelected ? mode.iconColor : Color.gray.opacity(0.2))
+                        .frame(width: 50, height: 50)
+
+                    Image(systemName: mode.icon)
+                        .font(.system(size: 24))
+                        .foregroundColor(isSelected ? .white : .gray)
+                }
+
+                // Content
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(mode.displayName)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.primary)
+
+                    Text(mode.description)
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.leading)
+
+                    // Limits display
+                    HStack(spacing: 12) {
+                        if mode == .weekly || mode == .monthlyWithWeeklyLimit {
+                            limitBadge("週", "\(weeklyLimit)", .green)
+                        }
+                        if mode == .monthly || mode == .monthlyWithWeeklyLimit {
+                            limitBadge("月", "\(monthlyLimit)", .blue)
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+
+                Spacer()
+
+                // Selection indicator
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 20))
+                    .foregroundColor(isSelected ? mode.iconColor : .gray.opacity(0.5))
+                    .scaleEffect(isSelected ? 1.2 : 1.0)
+                    .animation(.spring(response: 0.3), value: isSelected)
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(isSelected ? mode.iconColor.opacity(0.1) : Color(.systemGray6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(isSelected ? mode.iconColor : Color.gray.opacity(0.3), lineWidth: 1.5)
+                    )
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .scaleEffect(isSelected ? 1.02 : 1.0)
+        .animation(.spring(response: 0.4, dampingFraction: 0.7), value: isSelected)
+    }
+
+    private func limitBadge(_ label: String, _ value: String, _ color: Color) -> some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(color)
+
+            Text(value)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(color)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(color.opacity(0.1))
+        .cornerRadius(8)
+    }
+}
+
+// MARK: - Extensions
+extension VacationMode {
+    var iconColor: Color {
+        switch self {
+        case .weekly: return .green
+        case .monthly: return .blue
+        case .monthlyWithWeeklyLimit: return .purple
+        }
     }
 }
