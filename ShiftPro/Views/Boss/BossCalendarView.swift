@@ -22,10 +22,6 @@ struct BossCalendarView: View {
     @State private var showingSettingsView = false
     @State private var showingSchedulePublishView = false
 
-    // 🔥 優化：月份追蹤
-    @State private var visibleMonth: String = ""
-    @State private var isCalendarReady = false
-
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -72,7 +68,6 @@ struct BossCalendarView: View {
                 let monthKey = String(format: "%04d-%02d", selectedYear, selectedMonth)
                 print("📅 Boss 用戶手動選擇月份: \(monthKey)")
                 viewModel.updateDisplayMonth(year: selectedYear, month: selectedMonth)
-                visibleMonth = monthKey
             }
         }
         // 🔥 保持你的自定義設定
@@ -104,16 +99,13 @@ struct BossCalendarView: View {
 
     // MARK: - Setup
     private func setupCalendar() {
-        guard !isCalendarReady else { return }
 
         let now = Date()
         let year = Calendar.current.component(.year, from: now)
         let month = Calendar.current.component(.month, from: now)
         let monthKey = String(format: "%04d-%02d", year, month)
 
-        visibleMonth = monthKey
         viewModel.updateDisplayMonth(year: year, month: month)
-        isCalendarReady = true
 
         print("📱 Boss 初始化日曆視圖: \(monthKey)")
     }
@@ -146,12 +138,8 @@ struct BossCalendarView: View {
     private func handleVisibleMonthChange(month: CalendarMonth) {
         let monthKey = String(format: "%04d-%02d", month.year, month.month)
 
-        guard isCalendarReady else { return }
-        guard monthKey != visibleMonth else { return }
         guard isValidMonth(month: month) else { return }
 
-        print("📅 Boss 切換到可見月份: \(visibleMonth) -> \(monthKey)")
-        visibleMonth = monthKey
         viewModel.updateDisplayMonth(year: month.year, month: month.month)
     }
 

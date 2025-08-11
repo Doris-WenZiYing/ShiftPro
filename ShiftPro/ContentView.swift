@@ -26,7 +26,7 @@ struct ContentView: View {
             // 🔥 修復：根據初始化和認證狀態顯示不同內容
             if userManager.isInitializing {
                 initializingView()
-            } else if shouldShowLoginPrompt {
+            } else if shouldShowLogin {
                 loginPromptView()
             } else {
                 mainContentView()
@@ -256,45 +256,8 @@ struct ContentView: View {
     // MARK: - 🔧 狀態邏輯
 
     // 🔥 修復：更精確的登入提示判斷邏輯
-    private var shouldShowLoginPrompt: Bool {
-        // 🔥 修復：首先檢查是否還在初始化
-        if userManager.isInitializing {
-            print("🔄 ContentView: 用戶管理器還在初始化中")
-            return false
-        }
-
-        // 🔥 修復：檢查認證狀態
-        let isAuthenticated = authService.isAuthenticated
-        let isGuest = userManager.isGuest
-        let hasUserData = userManager.currentUser != nil
-
-        print("🔍 ContentView 登入狀態檢查:")
-        print("  - isAuthenticated: \(isAuthenticated)")
-        print("  - isGuest: \(isGuest)")
-        print("  - hasUserData: \(hasUserData)")
-        print("  - isInitializing: \(userManager.isInitializing)")
-
-        // 如果是訪客模式，不顯示登入提示
-        if isGuest {
-            print("👤 ContentView: 訪客模式，不顯示登入提示")
-            return false
-        }
-
-        // 如果已認證且有用戶資料，不顯示登入提示
-        if isAuthenticated && hasUserData {
-            print("✅ ContentView: 已登入且有用戶資料，不顯示登入提示")
-            return false
-        }
-
-        // 如果已認證但沒有用戶資料，表示正在載入，不顯示登入提示
-        if isAuthenticated && !hasUserData {
-            print("🔄 ContentView: 已認證但正在載入用戶資料，不顯示登入提示")
-            return false
-        }
-
-        // 其他情況顯示登入提示
-        print("🔑 ContentView: 顯示登入提示")
-        return true
+    private var shouldShowLogin: Bool {
+        return !userManager.isGuest && !authService.isAuthenticated
     }
 
     // MARK: - 🔄 處理認證狀態變化

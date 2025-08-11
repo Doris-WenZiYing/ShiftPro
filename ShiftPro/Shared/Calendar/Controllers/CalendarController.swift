@@ -17,7 +17,6 @@ public class CalendarController: ObservableObject {
     @Published public var yearMonth: CalendarMonth
     @Published public var selectedDate: CalendarDate?
     @Published internal var position: Int = CalendarConstants.centerPage
-    @Published internal var internalYearMonth: CalendarMonth
 
     public let orientation: CalendarOrientation
     internal let scrollDetector: CurrentValueSubject<CGFloat, Never>
@@ -25,23 +24,18 @@ public class CalendarController: ObservableObject {
 
     private var isUserInitiated = false
     private var lastLoggedMonth: CalendarMonth?
-    private var isUpdating = false  // 防止重複更新
-    private var lastUpdateTime: Date = Date.distantPast
-    private let minUpdateInterval: TimeInterval = 0.3  // 最小更新間隔
 
     public init(orientation: CalendarOrientation = .vertical, month: CalendarMonth = .current) {
         let detector = CurrentValueSubject<CGFloat, Never>(0)
 
         self.orientation = orientation
         self.scrollDetector = detector
-        self.internalYearMonth = month
         self.yearMonth = month
         self.selectedDate = CalendarDate.today
         self.lastLoggedMonth = month
 
         // 🔥 修復：更穩定的滾動檢測
         detector
-            .debounce(for: .seconds(0.3), scheduler: DispatchQueue.main)  // 增加防抖時間
             .dropFirst()
             .sink { [weak self] value in
                 self?.handleScrollChange(value)
@@ -53,35 +47,18 @@ public class CalendarController: ObservableObject {
 
     // 🔥 修復：穩定的滾動變化處理
     private func handleScrollChange(_ value: CGFloat) {
-        guard !isUpdating else { return }
-
-        let now = Date()
-        guard now.timeIntervalSince(lastUpdateTime) >= minUpdateInterval else { return }
-
-        isUpdating = true
-        lastUpdateTime = now
-
         let move = position - CalendarConstants.centerPage
-        let newMonth = internalYearMonth.addMonths(move)
+        let newMonth = yearMonth.addMonths(move)
 
-        // 🔥 只在真正變化且變化合理時更新
+        // 只在真正變化時更新
         if newMonth != yearMonth && abs(move) <= 1 {
-            let oldMonth = yearMonth
-            internalYearMonth = newMonth
             yearMonth = newMonth
+            position = CalendarConstants.centerPage
 
-            // 🔥 控制日誌輸出頻率
             if shouldLogMonthChange(newMonth) {
-                print("📅 Calendar 滾動變化: \(formatMonth(oldMonth)) → \(formatMonth(newMonth))")
+                print("📅 Calendar 月份變化: \(formatMonth(newMonth))")
                 lastLoggedMonth = newMonth
             }
-        }
-
-        // 🔥 穩定重置位置
-        DispatchQueue.main.async {
-            self.position = CalendarConstants.centerPage
-            self.isUpdating = false
-            self.objectWillChange.send()
         }
     }
 
@@ -110,25 +87,14 @@ public class CalendarController: ObservableObject {
     }
 
     public func setYearMonth(_ month: CalendarMonth) {
-        guard !isUpdating else { return }
+            guard month != yearMonth else { return }
 
-        // 🔥 防止無效更新
-        guard month != yearMonth else { return }
+            isUserInitiated = true
+            yearMonth = month
+            position = CalendarConstants.centerPage
 
-        isUpdating = true
-        isUserInitiated = true
-
-        yearMonth = month
-        internalYearMonth = month
-        position = CalendarConstants.centerPage
-
-        DispatchQueue.main.async {
-            self.isUpdating = false
-            self.objectWillChange.send()
+            print("📅 Calendar 用戶設定月份: \(formatMonth(month))")
         }
-
-        print("📅 Calendar 用戶設定月份: \(formatMonth(month))")
-    }
 
     public func selectDate(_ date: CalendarDate) {
         selectedDate = date
@@ -144,11 +110,9 @@ public class CalendarController: ObservableObject {
         let targetMonth = CalendarMonth(year: year, month: month)
 
         guard targetMonth != yearMonth else { return }
-        guard !isUpdating else { return }
 
         // 直接更新，不觸發用戶操作標記
         yearMonth = targetMonth
-        internalYearMonth = targetMonth
         position = CalendarConstants.centerPage
 
         // 不設置 isUserInitiated，避免產生日誌
@@ -157,7 +121,6 @@ public class CalendarController: ObservableObject {
 
     // 🔥 修復：安全的月份導航
     public func navigateToMonth(year: Int, month: Int) {
-        guard !isUpdating else { return }
         setYearMonth(year: year, month: month)
     }
 
@@ -172,14 +135,9 @@ public class CalendarController: ObservableObject {
         setYearMonth(previousMonth)
     }
 
-    // 🔥 新增：檢查是否可以安全更新
-    public func canUpdate() -> Bool {
-        return !isUpdating
-    }
 
     // 🔥 新增：強制重置狀態（如果遇到異常）
     public func resetState() {
-        isUpdating = false
         position = CalendarConstants.centerPage
         objectWillChange.send()
         print("🔄 Calendar 狀態已重置")
@@ -200,11 +158,6 @@ extension CalendarController {
 
         guard isValidMonth(targetMonth) else {
             print("⚠️ 無效的月份: \(year)-\(month)")
-            return false
-        }
-
-        guard canUpdate() else {
-            print("⚠️ Calendar 正在更新中，無法導航")
             return false
         }
 

@@ -35,8 +35,6 @@ class EmployeeCalendarViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     // MARK: - 數據管理
-    private var monthlyVacationData: [String: VacationData] = [:]
-    private var isInitialized = false
     private var currentListeners: [AnyCancellable] = []
 
     // MARK: - Computed Properties
@@ -70,16 +68,9 @@ class EmployeeCalendarViewModel: ObservableObject {
         formatter.dateFormat = "yyyy-MM"
         self.currentDisplayMonth = formatter.string(from: now)
 
-        print("👤 Employee ViewModel 初始化")
-
-        setupUserManager()
-        loadAllMonthlyData()
-
-        // 延遲初始化
+        // 🔥 簡化初始化
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            self.isInitialized = true
             self.loadCurrentMonthData()
-            self.setupNotificationListeners()
         }
     }
 
@@ -119,88 +110,47 @@ class EmployeeCalendarViewModel: ObservableObject {
 
     private func handleUserChange() {
         removeAllFirebaseListeners()
-        if isInitialized {
-            loadCurrentMonthData()
-        }
     }
 
     // MARK: - 📊 月份數據管理
 
-    private func loadAllMonthlyData() {
-        let calendar = Calendar.current
-        let currentDate = Date()
-
-        for offset in -3...3 {
-            if let targetDate = calendar.date(byAdding: .month, value: offset, to: currentDate) {
-                let formatter = DateFormatter()
-                formatter.dateFormat = "yyyy-MM"
-                let monthKey = formatter.string(from: targetDate)
-
-                if let localData = storage.loadVacationData(month: monthKey) {
-                    monthlyVacationData[monthKey] = localData
-                    print("📱 載入 \(monthKey) 本地數據: \(localData.selectedDates.count) 天")
-                }
-            }
+    private func loadCurrentMonthData() {
+        // 🔥 簡化數據載入
+        if let localData = LocalStorageService.shared.loadVacationData(month: currentDisplayMonth) {
+            vacationData = localData
+        } else {
+            vacationData = VacationData()
         }
+
+        setupFirebaseListeners()
     }
 
-    private func saveMonthlyData(_ data: VacationData, for month: String) {
-        monthlyVacationData[month] = data
-        storage.saveVacationData(data, month: month)
-        print("💾 保存 \(month) 數據: \(data.selectedDates.count) 天")
-    }
-
-    private func getVacationData(for month: String) -> VacationData {
-        if let data = monthlyVacationData[month] {
-            return data
-        }
-
-        if let localData = storage.loadVacationData(month: month) {
-            monthlyVacationData[month] = localData
-            return localData
-        }
-
-        let newData = VacationData()
-        monthlyVacationData[month] = newData
-        return newData
+    private func saveCurrentData() {
+        // 簡化數據保存邏輯
+        LocalStorageService.shared.saveVacationData(vacationData, month: currentDisplayMonth)
     }
 
     // MARK: - 🔄 月份更新
 
     func updateDisplayMonth(year: Int, month: Int) {
-        guard isInitialized else { return }
-
         let newMonth = String(format: "%04d-%02d", year, month)
-        guard isValidMonth(year: year, month: month) else {
-            handleError(ShiftProError.validationFailed("無效的月份選擇"), context: "Month Update")
-            return
-        }
-
-        // 保存當前月份數據
-        if currentDisplayMonth != newMonth {
-            saveMonthlyData(vacationData, for: currentDisplayMonth)
-        }
-
         guard newMonth != currentDisplayMonth else { return }
 
         print("📅 Employee 更新月份: \(currentDisplayMonth) -> \(newMonth)")
 
-        removeAllFirebaseListeners()
+        // 保存當前數據
+        saveCurrentData()
+
+        // 更新月份
         currentDisplayMonth = newMonth
-        vacationData = getVacationData(for: newMonth)
+
+        // 載入新月份數據
         loadCurrentMonthData()
     }
 
     private func isValidMonth(year: Int, month: Int) -> Bool {
         let currentYear = Calendar.current.component(.year, from: Date())
         return year >= currentYear - 1 && year <= currentYear + 2 && month >= 1 && month <= 12
-    }
-
-    // MARK: - 🔄 數據載入
-
-    private func loadCurrentMonthData() {
-        vacationData = getVacationData(for: currentDisplayMonth)
-        setupFirebaseListeners()
     }
 
     // MARK: - 🔥 Firebase 實時監聽
@@ -256,7 +206,6 @@ class EmployeeCalendarViewModel: ObservableObject {
             if vacationData.selectedDates != newData.selectedDates ||
                vacationData.isSubmitted != newData.isSubmitted {
                 vacationData = newData
-                saveMonthlyData(newData, for: currentDisplayMonth)
                 print("📊 Employee Firebase 排班更新: \(currentDisplayMonth) - \(s.selectedDates.count)天, 提交=\(s.isSubmitted)")
             }
         }
@@ -374,7 +323,6 @@ class EmployeeCalendarViewModel: ObservableObject {
                     var updatedData = self.vacationData
                     updatedData.isSubmitted = true
                     self.vacationData = updatedData
-                    self.saveMonthlyData(updatedData, for: self.currentDisplayMonth)
                 }
 
                 self?.exitEditMode()
@@ -399,7 +347,6 @@ class EmployeeCalendarViewModel: ObservableObject {
         // 清除本地資料
         let emptyData = VacationData()
         vacationData = emptyData
-        saveMonthlyData(emptyData, for: currentDisplayMonth)
 
         // 刪除 Firebase 資料
         let docId = "\(currentOrgId)_\(currentEmployeeId)_\(currentDisplayMonth)"
@@ -437,7 +384,6 @@ class EmployeeCalendarViewModel: ObservableObject {
     func clearAllVacationDataWithToast() {
         let emptyData = VacationData()
         vacationData = emptyData
-        saveMonthlyData(emptyData, for: currentDisplayMonth)
         showToast("已清除所有選擇", type: .info)
     }
 
@@ -555,7 +501,6 @@ class EmployeeCalendarViewModel: ObservableObject {
         successDate: String? = nil
     ) {
         vacationData = data
-        saveMonthlyData(data, for: currentDisplayMonth)
 
         if let msg = message {
             showToast(msg, type: type)
