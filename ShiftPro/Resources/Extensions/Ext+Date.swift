@@ -35,9 +35,8 @@ extension DateFormatter {
 
 // 🔥 修復問題4：完全移除格式化器，直接使用字串轉換
 extension CalendarMonth {
-    /// 🔥 修復：獲取年份字串（無千位分隔符）- 直接轉換版本
     var yearString: String {
-        return String(self.year) // 直接轉換，確保無逗號
+        return String(self.year)
     }
 
     /// 獲取完整的年月顯示字串

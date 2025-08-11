@@ -179,7 +179,7 @@ struct BossCalendarView: View {
                             .minimumScaleFactor(0.7)
 
                         // 🔥 修復問題3：直接使用 Int 轉 String，避免格式化器
-                        Text("\(month.year)年")
+                        Text("\(month.yearString)年")
                             .font(.system(size: 18, weight: .medium))
                             .foregroundColor(.white.opacity(0.9))
 

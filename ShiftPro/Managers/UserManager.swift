@@ -37,8 +37,19 @@ class UserManager: ObservableObject {
         print("👤 UserManager 初始化開始")
         setupAuthStateListener()
 
-        // 🔥 修復：不再延遲載入本地資料，讓 Auth 狀態決定
-        // 移除本地資料載入，完全依賴 Firebase Auth 狀態
+        isInitializing = true
+
+        // 延遲設置監聽器，讓初始化畫面有時間顯示
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.setupAuthStateListener()
+        }
+
+        // 🔥 修復：確保至少顯示2秒的初始化畫面
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            if self.isInitializing {
+                self.completeInitialization()
+            }
+        }
     }
 
     deinit {
@@ -79,7 +90,7 @@ class UserManager: ObservableObject {
         guard let user = firebaseUser else {
             print("🚪 用戶登出，清除資料")
             clearUserData()
-            completeInitialization()
+            self.completeInitialization() // 🔥 確保完成初始化
             isProcessingAuthChange = false
             return
         }
@@ -87,7 +98,7 @@ class UserManager: ObservableObject {
         if user.isAnonymous {
             print("👤 匿名用戶，設置訪客模式")
             setupGuestMode()
-            completeInitialization()
+            self.completeInitialization() // 🔥 確保完成初始化
             isProcessingAuthChange = false
         } else {
             print("✅ 正常用戶，從 Firebase 載入資料")
@@ -99,13 +110,13 @@ class UserManager: ObservableObject {
                         case .failure(let error):
                             print("❌ 載入用戶資料失敗: \(error)")
                             self?.handleError(error, context: "Load User Data")
-                            self?.completeInitialization()
+                            self?.completeInitialization() // 🔥 確保完成初始化
                         case .finished:
                             break
                         }
                     },
                     receiveValue: { [weak self] in
-                        self?.completeInitialization()
+                        self?.completeInitialization() // 🔥 確保完成初始化
                     }
                 )
                 .store(in: &cancellables)
@@ -271,9 +282,9 @@ class UserManager: ObservableObject {
 
     private func completeInitialization() {
         DispatchQueue.main.async {
-            if !self.hasCompletedInitialLoad {
-                self.hasCompletedInitialLoad = true
+            if self.isInitializing {
                 self.isInitializing = false
+                self.hasCompletedInitialLoad = true
                 print("✅ UserManager 初始化完成")
             }
         }

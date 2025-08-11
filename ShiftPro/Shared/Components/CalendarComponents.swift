@@ -39,7 +39,7 @@ struct CalendarMonthTitle: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
 
-                        Text("\(month.year)年")
+                        Text("\(month.yearString)年")
                             .font(.system(size: 18, weight: .medium))
                             .foregroundColor(.white.opacity(0.9))
 
