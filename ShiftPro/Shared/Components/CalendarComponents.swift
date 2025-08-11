@@ -422,6 +422,36 @@ struct CalendarActionBar: View {
     }
 }
 
+// MARK: - Status Card Component
+struct StatusCard: View {
+    let title: String
+    let status: String
+    let color: Color
+    let icon: String
+
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 10))
+                    .foregroundColor(color)
+
+                Text(status)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(color)
+            }
+
+            Text(title)
+                .font(.system(size: 10))
+                .foregroundColor(.white.opacity(0.7))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(color.opacity(0.2))
+        .cornerRadius(12)
+    }
+}
+
 // MARK: - Calendar Statistics Component
 struct CalendarStatistics: View {
     let stats: [StatItem]

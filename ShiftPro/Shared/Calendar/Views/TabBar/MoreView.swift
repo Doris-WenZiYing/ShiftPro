@@ -12,7 +12,6 @@ struct MoreView: View {
     @StateObject private var userManager = UserManager.shared
     @StateObject private var authService = AuthManager.shared
     @StateObject private var orgManager = OrganizationManager.shared
-    @StateObject private var firebaseInitializer = FirebaseInitializer.shared
 
     @State private var showingLoginView = false
     @State private var showingLogoutAlert = false
@@ -20,7 +19,6 @@ struct MoreView: View {
     @State private var organizationInviteCode = ""
     @State private var isLoadingInviteCode = false
     @State private var showingRoleChangeAlert = false
-    @State private var showingFirebaseInitAlert = false
     @State private var showingErrorAlert = false
     @State private var errorMessage = ""
 
@@ -46,6 +44,7 @@ struct MoreView: View {
         }
         .sheet(isPresented: $showingInviteCodeSheet) {
             InviteCodeSheet(inviteCode: organizationInviteCode)
+                .presentationDetents([.medium])
         }
         .alert("登出確認", isPresented: $showingLogoutAlert) {
             Button("取消", role: .cancel) { }
@@ -62,14 +61,6 @@ struct MoreView: View {
             }
         } message: {
             Text("這是測試功能，僅在訪客模式下可用")
-        }
-        .alert("初始化 Firebase", isPresented: $showingFirebaseInitAlert) {
-            Button("取消", role: .cancel) { }
-            Button("確認初始化") {
-                firebaseInitializer.initializeAllTestData()
-            }
-        } message: {
-            Text("這將在 Firebase 中建立測試數據")
         }
         .alert("錯誤", isPresented: $showingErrorAlert) {
             Button("確定") { }
@@ -392,7 +383,7 @@ struct MoreView: View {
         .cornerRadius(16)
     }
 
-    // MARK: - 測試功能卡片
+    // MARK: - 🔥 簡化的測試功能卡片（移除 Firebase 初始化）
     private func testFeaturesCard() -> some View {
         VStack(spacing: 12) {
             HStack {
@@ -418,17 +409,8 @@ struct MoreView: View {
                 }
                 .buttonStyle(PlainButtonStyle())
 
-                if userManager.userRole == .boss {
-                    Button(action: { showingFirebaseInitAlert = true }) {
-                        settingRowContent(
-                            icon: "server.rack",
-                            title: "初始化測試數據",
-                            subtitle: "建立 Firebase 測試數據",
-                            color: .purple
-                        )
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                }
+                // 🔥 移除 Firebase 初始化功能
+                // 因為不再需要測試數據功能
             }
         }
         .padding(16)
@@ -642,37 +624,7 @@ struct MoreView: View {
 
     // MARK: - Actions
     private func performRoleSwitch() {
-        // Option 1: If switchRole is a simple method
         userManager.switchRole()
-
-        // Option 2: If switchRole returns a publisher (uncomment if needed)
-        /*
-        userManager.switchRole()
-            .receive(on: DispatchQueue.main)
-            .sink(
-                receiveCompletion: { completion in
-                    if case .failure(let error) = completion {
-                        print("❌ 切換身分失敗: \(error)")
-                    }
-                },
-                receiveValue: { _ in
-                    print("✅ 切換身分成功")
-                }
-            )
-            .store(in: &cancellables)
-        */
-
-        // Option 3: If it's an async method (uncomment if needed)
-        /*
-        Task {
-            do {
-                await userManager.switchRole()
-                print("✅ 切換身分成功")
-            } catch {
-                print("❌ 切換身分失敗: \(error)")
-            }
-        }
-        */
     }
 
     private func loadInviteCode() {

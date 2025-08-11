@@ -7,8 +7,6 @@
 
 import SwiftUI
 
-// MARK: - 🎨 Toast & Alert Models
-
 public enum ToastType: CaseIterable {
     case success
     case error
@@ -122,37 +120,6 @@ public enum SyncStatus {
     }
 }
 
-// MARK: - 🎨 Theme & Design Models
-
-public struct AppTheme {
-    // Colors
-    public static let background = Color.black
-    public static let textPrimary = Color.white
-    public static let accentBlue = Color(hex: "#3F8CFF")
-
-    // Spacing
-    public static let paddingSmall: CGFloat = 8
-    public static let paddingMedium: CGFloat = 16
-    public static let paddingLarge: CGFloat = 24
-
-    // Corner Radius
-    public static let cornerRadiusSmall: CGFloat = 8
-    public static let cornerRadiusMedium: CGFloat = 12
-    public static let cornerRadiusLarge: CGFloat = 16
-}
-
-// MARK: - 🎯 Animation Models
-
-public struct AnimationPresets {
-    public static let quickFade = Animation.easeInOut(duration: 0.2)
-    public static let standardFade = Animation.easeInOut(duration: 0.3)
-    public static let slowFade = Animation.easeInOut(duration: 0.5)
-
-    public static let quickSpring = Animation.spring(response: 0.3, dampingFraction: 0.7)
-    public static let standardSpring = Animation.spring(response: 0.5, dampingFraction: 0.8)
-    public static let bouncySpring = Animation.spring(response: 0.6, dampingFraction: 0.6)
-}
-
 // MARK: - 📊 Status Badge Models
 
 public struct StatusBadgeConfig {
@@ -167,15 +134,6 @@ public struct StatusBadgeConfig {
         self.color = color
         self.icon = icon
     }
-}
-
-// MARK: - 📐 Layout Models
-
-public struct ViewDimensions {
-    public static let tabBarHeight: CGFloat = 44
-    public static let topSafeArea: CGFloat = 45
-    public static let calendarCellMinHeight: CGFloat = 70
-    public static let menuWidth: CGFloat = 280
 }
 
 // MARK: - 🎪 Presentation Models
