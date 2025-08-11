@@ -29,7 +29,7 @@ final class FirebaseService {
 
     private func setupNetworkMonitoring() {
         // 簡單的網路狀態監聽
-        firestore.enableNetwork { [weak self] error in
+        firestore.enableNetwork { error in
             if let error = error {
                 print("❌ Firebase 網路連線失敗: \(error)")
                 ErrorHandler.shared.handle(ShiftProError.networkConnection)

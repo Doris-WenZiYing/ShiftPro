@@ -14,30 +14,59 @@ struct ContentView: View {
     @StateObject private var userManager = UserManager.shared
     @StateObject private var authService = AuthManager.shared
     @State private var showingLoginView = false
-    @State private var showingError = false
 
-    // 🔥 修復：錯誤處理
+    // MARK: - 🔥 統一的初始化狀態管理
+    @State private var initializationState: InitializationState = .starting
+    @State private var initializationProgress: String = "正在啟動..."
     @State private var cancellables = Set<AnyCancellable>()
+
+    enum InitializationState: Equatable {
+        case starting
+        case checkingAuth
+        case loadingUserData
+        case ready
+        case error(String)
+
+        static func == (lhs: InitializationState, rhs: InitializationState) -> Bool {
+            switch (lhs, rhs) {
+            case (.starting, .starting),
+                 (.checkingAuth, .checkingAuth),
+                 (.loadingUserData, .loadingUserData),
+                 (.ready, .ready):
+                return true
+            case (.error(let lhsMessage), .error(let rhsMessage)):
+                return lhsMessage == rhsMessage
+            default:
+                return false
+            }
+        }
+    }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            // 🔥 修復：根據初始化和認證狀態顯示不同內容
-            if userManager.isInitializing {
+            // 🔥 根據初始化狀態顯示不同內容
+            switch initializationState {
+            case .starting, .checkingAuth, .loadingUserData:
                 initializingView()
-            } else if shouldShowLogin {
-                loginPromptView()
-            } else {
-                mainContentView()
+
+            case .ready:
+                if shouldShowLogin {
+                    loginPromptView()
+                } else {
+                    mainContentView()
+                }
+
+            case .error(let message):
+                errorView(message: message)
             }
         }
-        .sheet(isPresented: $showingLoginView) {
+        .fullScreenCover(isPresented: $showingLoginView) {
             LoginView()
         }
         .onAppear {
-            print("🚀 ContentView 啟動")
-            // 🔥 移除手動初始化，讓 UserManager 自行處理
+            startInitialization()
         }
         .onChange(of: authService.isAuthenticated) { _, isAuthenticated in
             handleAuthenticationChange(isAuthenticated)
@@ -45,47 +74,153 @@ struct ContentView: View {
         .onChange(of: userManager.userRole) { _, newRole in
             handleRoleChange(newRole)
         }
-        .errorHandling {
-            // 重試邏輯 - 如果需要的話
-        }
-        .onReceive(userManager.$lastError) { error in
-            if error != nil {
-                showingError = true
-            }
-        }
-        .onReceive(authService.$lastError) { error in
-            if error != nil {
-                showingError = true
-            }
-        }
+        .animation(.easeInOut(duration: 0.5), value: initializationState)
     }
 
-    // MARK: - 🔄 初始化載入畫面
-
+    // MARK: - 🔥 改進的初始化載入畫面
     private func initializingView() -> some View {
-        VStack(spacing: 20) {
-            Image(systemName: "calendar.badge.checkmark")
-                .font(.system(size: 80))
-                .foregroundColor(.blue)
-                .pulse()
+        VStack(spacing: 30) {
+            // Logo 動畫
+            VStack(spacing: 20) {
+                Image(systemName: "calendar.badge.checkmark")
+                    .font(.system(size: 80))
+                    .foregroundColor(.blue)
+                    .pulse() // 脈衝動畫
 
-            Text("ShiftPro")
-                .font(.system(size: 32, weight: .bold))
-                .foregroundColor(.white)
+                Text("ShiftPro")
+                    .font(.system(size: 32, weight: .bold))
+                    .foregroundColor(.white)
+                    .scaleEffect(1.0)
+                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: initializationProgress)
+            }
 
-            Text("正在初始化...")
-                .font(.system(size: 16))
-                .foregroundColor(.white.opacity(0.7))
+            // 進度指示
+            VStack(spacing: 16) {
+                Text(initializationProgress)
+                    .font(.system(size: 16))
+                    .foregroundColor(.white.opacity(0.8))
+                    .multilineTextAlignment(.center)
 
-            ProgressView()
-                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                .scaleEffect(1.2)
+                // 動態進度條
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: .blue))
+                    .scaleEffect(1.2)
+
+                // 載入步驟指示
+                HStack(spacing: 8) {
+                    progressDot(isActive: true) // 啟動
+                    progressDot(isActive: initializationState != .starting)
+                    progressDot(isActive: initializationState == .ready)
+                }
+            }
+
+            // 提示文字
+            VStack(spacing: 8) {
+                Text("智能排班管理系統")
+                    .font(.system(size: 14))
+                    .foregroundColor(.white.opacity(0.6))
+
+                Text("初始化中，請稍候...")
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.4))
+            }
         }
         .transition(.opacity)
     }
 
-    // MARK: - 🔑 登入提示畫面
+    private func progressDot(isActive: Bool) -> some View {
+        Circle()
+            .fill(isActive ? Color.blue : Color.white.opacity(0.3))
+            .frame(width: 8, height: 8)
+            .scaleEffect(isActive ? 1.2 : 1.0)
+            .animation(.easeInOut(duration: 0.3), value: isActive)
+    }
 
+    // MARK: - 🔥 錯誤狀態顯示
+    private func errorView(message: String) -> some View {
+        VStack(spacing: 30) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 60))
+                .foregroundColor(.red)
+
+            VStack(spacing: 16) {
+                Text("初始化失敗")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(.white)
+
+                Text(message)
+                    .font(.system(size: 16))
+                    .foregroundColor(.white.opacity(0.8))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+            }
+
+            VStack(spacing: 12) {
+                PrimaryButton(
+                    title: "重新嘗試",
+                    icon: "arrow.clockwise"
+                ) {
+                    startInitialization()
+                }
+                .padding(.horizontal, 32)
+            }
+        }
+        .transition(.opacity)
+    }
+
+    // MARK: - 🔥 統一的初始化流程
+    private func startInitialization() {
+        print("🚀 ContentView 開始初始化流程")
+        initializationState = .starting
+        initializationProgress = "正在啟動 ShiftPro..."
+
+        // 步驟 1: 基本延遲確保載入畫面顯示
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            self.checkAuthentication()
+        }
+    }
+
+    private func checkAuthentication() {
+        initializationState = .checkingAuth
+        initializationProgress = "檢查登入狀態..."
+
+        // 步驟 2: 檢查認證狀態
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            if self.authService.isAuthenticated {
+                self.loadUserData()
+            } else {
+                self.initializationProgress = "準備就緒"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    self.completeInitialization()
+                }
+            }
+        }
+    }
+
+    private func loadUserData() {
+        initializationState = .loadingUserData
+        initializationProgress = "載入用戶資料..."
+
+        // 步驟 3: 載入用戶數據
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            if self.userManager.currentUser != nil {
+                self.initializationProgress = "載入完成"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    self.completeInitialization()
+                }
+            } else {
+                // 如果載入失敗，提供重試選項
+                self.initializationState = .error("無法載入用戶資料")
+            }
+        }
+    }
+
+    private func completeInitialization() {
+        print("✅ ContentView 初始化完成")
+        initializationState = .ready
+    }
+
+    // MARK: - 登入提示畫面（保持原有邏輯）
     private func loginPromptView() -> some View {
         VStack(spacing: 30) {
             Spacer()
@@ -125,14 +260,6 @@ struct ContentView: View {
                 ) {
                     showingLoginView = true
                 }
-
-                SecondaryButton(
-                    title: "訪客體驗",
-                    icon: "person.crop.circle.dashed",
-                    color: .white.opacity(0.8)
-                ) {
-                    enterGuestMode()
-                }
             }
             .padding(.horizontal, 32)
             .padding(.bottom, 50)
@@ -160,8 +287,7 @@ struct ContentView: View {
         .padding(.horizontal, 32)
     }
 
-    // MARK: - 🏠 主要內容視圖
-
+    // MARK: - 主要內容視圖（保持原有邏輯）
     private func mainContentView() -> some View {
         VStack(spacing: 0) {
             // 主要內容區域
@@ -184,16 +310,16 @@ struct ContentView: View {
         }
         .overlay {
             // Menu overlay
-            if menuState.isMenuPresented {
-                CustomMenuOverlay(
-                    isPresented: $menuState.isMenuPresented,
-                    currentVacationMode: $menuState.currentVacationMode,
-                    isVacationModeMenuPresented: $menuState.isVacationModeMenuPresented
-                )
-                .zIndex(999)
-                .ignoresSafeArea(.all)
-                .transition(.move(edge: .trailing))
-            }
+//            if menuState.isMenuPresented {
+//                CustomMenuOverlay(
+//                    isPresented: $menuState.isMenuPresented,
+//                    currentVacationMode: $menuState.currentVacationMode,
+//                    isVacationModeMenuPresented: $menuState.isVacationModeMenuPresented
+//                )
+//                .zIndex(999)
+//                .ignoresSafeArea(.all)
+//                .transition(.move(edge: .trailing))
+//            }
         }
         .sheet(isPresented: $menuState.isVacationModeMenuPresented) {
             VacationModeSelectionSheet(
@@ -206,8 +332,7 @@ struct ContentView: View {
         .transition(.opacity)
     }
 
-    // MARK: - 📅 Calendar View 路由
-
+    // MARK: - Calendar View 路由
     @ViewBuilder
     private func calendarView() -> some View {
         if userManager.userRole == .boss {
@@ -217,8 +342,7 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - 📊 佔位符視圖
-
+    // MARK: - 佔位符視圖（保持原有）
     private func reportsView() -> some View {
         VStack(spacing: 20) {
             Image(systemName: "chart.bar.fill")
@@ -253,74 +377,38 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - 🔧 狀態邏輯
-
-    // 🔥 修復：更精確的登入提示判斷邏輯
+    // MARK: - 🔥 簡化的狀態邏輯
     private var shouldShowLogin: Bool {
         return !userManager.isGuest && !authService.isAuthenticated
     }
 
-    // MARK: - 🔄 處理認證狀態變化
-
+    // MARK: - 事件處理（簡化版）
     private func handleAuthenticationChange(_ isAuthenticated: Bool) {
         print("🔐 ContentView 認證狀態變化: \(isAuthenticated)")
-        print("  - 當前用戶: \(userManager.currentUser?.name ?? "nil")")
-        print("  - 是否訪客: \(userManager.isGuest)")
 
-        withAnimation(.easeInOut(duration: 0.3)) {
-            if isAuthenticated {
-                selectedTab = .calendar
-                menuState.isMenuPresented = false
-                menuState.isVacationModeMenuPresented = false
-            } else {
-                // 🔥 修復：登出時重置狀態
-                selectedTab = .calendar
-                menuState.isMenuPresented = false
-                menuState.isVacationModeMenuPresented = false
-
-                // 🔥 新增：如果需要的話，可以強制重置 AuthManager
-                // authService.forceSignOutForDevelopment()
+        // 🔥 如果在初始化完成後認證狀態變化，直接處理
+        if initializationState == .ready {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                if isAuthenticated {
+                    selectedTab = .calendar
+                    menuState.isMenuPresented = false
+                } else {
+                    selectedTab = .calendar
+                    menuState.isMenuPresented = false
+                }
             }
         }
     }
 
-    // MARK: - 🔄 處理角色變化
-
     private func handleRoleChange(_ newRole: UserRole) {
         print("🔄 ContentView 角色變化: \(newRole)")
-        print("  - 當前用戶: \(userManager.currentUser?.name ?? "nil")")
-        print("  - 登入狀態: \(userManager.isLoggedIn)")
-        print("  - 訪客模式: \(userManager.isGuest)")
 
-        withAnimation(.easeInOut(duration: 0.3)) {
-            selectedTab = .calendar
-            menuState.isMenuPresented = false
-            menuState.isVacationModeMenuPresented = false
+        if initializationState == .ready {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                selectedTab = .calendar
+                menuState.isMenuPresented = false
+            }
         }
-    }
-
-    // MARK: - 👤 進入訪客模式
-
-    private func enterGuestMode() {
-        print("👤 ContentView 進入訪客模式")
-
-        userManager.enterGuestMode()
-            .receive(on: DispatchQueue.main)
-            .sink(
-                receiveCompletion: { completion in
-                    switch completion {
-                    case .failure(let error):
-                        print("❌ 進入訪客模式失敗: \(error)")
-                        ErrorHandler.shared.handle(error, context: "Guest Mode")
-                    case .finished:
-                        break
-                    }
-                },
-                receiveValue: { _ in
-                    print("✅ 成功進入訪客模式")
-                }
-            )
-            .store(in: &cancellables)
     }
 }
 

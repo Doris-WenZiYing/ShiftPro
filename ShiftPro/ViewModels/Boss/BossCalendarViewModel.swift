@@ -10,36 +10,40 @@ import Combine
 import SwiftUI
 
 class BossCalendarViewModel: ObservableObject {
-    // MARK: - Published Properties
+    // MARK: - 🔥 簡化的 Published Properties
     @Published var currentVacationMode: VacationMode = .monthly
-    @Published var isVacationPublished = false
-    @Published var isSchedulePublished = false
-    @Published var toastMessage = ""
-    @Published var toastType: ToastType = .info
-    @Published var isToastShowing = false
     @Published var currentDisplayMonth: String
     @Published var lastError: ShiftProError?
 
-    // MARK: - Firebase 狀態追蹤
+    // MARK: - 🔥 簡化的 Firebase 狀態
     @Published var firebaseRule: FirestoreVacationRule?
     @Published var isFirebaseLoading = false
-    @Published var lastSyncTime: Date?
+    @Published var isSchedulePublished = false
+
+    // MARK: - 🔥 簡化的 Toast 管理
+    @Published var toastMessage = ""
+    @Published var toastType: ToastType = .info
+    @Published var isToastShowing = false
 
     // MARK: - Dependencies
     private let firebase = FirebaseService.shared
     private let userManager = UserManager.shared
     private var cancellables = Set<AnyCancellable>()
 
-    // MARK: - 狀態管理
-    private var isInitialized = false
-    private var currentListener: AnyCancellable?
+    // MARK: - 🔥 簡化的狀態管理 - 移除複雜的監聽器管理
+    private var activeListener: AnyCancellable?
 
     // MARK: - Computed Properties
     private var currentOrgId: String {
         userManager.currentOrgId
     }
 
-    var realVacationStatus: String {
+    // 🔥 統一的狀態計算
+    var isVacationPublished: Bool {
+        firebaseRule?.published ?? false
+    }
+
+    var vacationStatusText: String {
         if isFirebaseLoading {
             return "處理中"
         }
@@ -51,7 +55,7 @@ class BossCalendarViewModel: ObservableObject {
         }
     }
 
-    var realVacationStatusColor: Color {
+    var vacationStatusColor: Color {
         if isFirebaseLoading {
             return .blue
         }
@@ -63,6 +67,20 @@ class BossCalendarViewModel: ObservableObject {
         }
     }
 
+    var scheduleStatusText: String {
+        if isFirebaseLoading {
+            return "處理中..."
+        }
+        return isSchedulePublished ? "已發佈" : "未發佈"
+    }
+
+    var scheduleStatusColor: Color {
+        if isFirebaseLoading {
+            return .blue
+        }
+        return isSchedulePublished ? .green : .orange
+    }
+
     // MARK: - Init
     init() {
         let now = Date()
@@ -70,13 +88,10 @@ class BossCalendarViewModel: ObservableObject {
         formatter.dateFormat = "yyyy-MM"
         self.currentDisplayMonth = formatter.string(from: now)
 
-        print("👑 Boss ViewModel 初始化")
+        print("👑 Boss ViewModel 初始化: \(currentDisplayMonth)")
 
-        setupUserManager()
-
-        // 延遲初始化
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            self.isInitialized = true
+        // 🔥 簡化初始化
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             self.loadCurrentMonthData()
         }
     }
@@ -87,107 +102,59 @@ class BossCalendarViewModel: ObservableObject {
         cancellables.forEach { $0.cancel() }
     }
 
-    // MARK: - 🔧 用戶管理設置
-
-    private func setupUserManager() {
-        if !userManager.isLoggedIn && !userManager.isGuest {
-            userManager.setCurrentBoss(
-                orgId: "demo_store_01",
-                bossName: "測試老闆",
-                orgName: "Demo Store"
-            )
-        }
-
-        userManager.$currentUser
-            .sink { [weak self] _ in
-                self?.handleUserChange()
-            }
-            .store(in: &cancellables)
-
-        // 監聽用戶錯誤
-        userManager.$lastError
-            .sink { [weak self] error in
-                if let error = error {
-                    self?.handleError(error, context: "User Manager")
-                }
-            }
-            .store(in: &cancellables)
-    }
-
-    private func handleUserChange() {
-        removeFirebaseListener()
-        if isInitialized {
-            loadCurrentMonthData()
-        }
-    }
-
-    // MARK: - 🔄 月份更新
-
+    // MARK: - 🔥 簡化的月份更新
     func updateDisplayMonth(year: Int, month: Int) {
-        guard isInitialized else { return }
-
         let newMonth = String(format: "%04d-%02d", year, month)
-        guard isValidMonth(year: year, month: month) else {
-            handleError(ShiftProError.validationFailed("無效的月份選擇"), context: "Month Update")
-            return
-        }
         guard newMonth != currentDisplayMonth else { return }
 
-        print("📅 Boss 更新月份: \(currentDisplayMonth) -> \(newMonth)")
+        print("📅 Boss 月份更新: \(currentDisplayMonth) -> \(newMonth)")
 
-        removeFirebaseListener()
+        // 🔥 立即更新月份，清除舊狀態
         currentDisplayMonth = newMonth
+
+        // 🔥 關鍵修復：清除舊狀態，避免顯示錯誤信息
+        firebaseRule = nil
+
+        // 立即載入新月份數據
         loadCurrentMonthData()
     }
 
-    private func isValidMonth(year: Int, month: Int) -> Bool {
-        let currentYear = Calendar.current.component(.year, from: Date())
-        return year >= currentYear - 1 && year <= currentYear + 2 && month >= 1 && month <= 12
-    }
-
-    // MARK: - 🔄 數據載入
-
+    // MARK: - 🔥 簡化的數據載入
     private func loadCurrentMonthData() {
         setupFirebaseListener()
     }
 
-    // MARK: - 🔥 Firebase 實時監聽
-
+    // MARK: - 🔥 修復的 Firebase 監聽器
     private func setupFirebaseListener() {
         removeFirebaseListener()
 
-        currentListener = firebase.fetchVacationRule(orgId: currentOrgId, month: currentDisplayMonth)
+        print("👂 Boss 設置 Firebase 監聽: \(currentDisplayMonth)")
+
+        activeListener = firebase.fetchVacationRule(orgId: currentOrgId, month: currentDisplayMonth)
             .replaceError(with: nil)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] rule in
                 self?.handleRuleUpdate(rule)
             }
-
-        print("👂 Boss 設置 Firebase 監聽: \(currentDisplayMonth)")
     }
 
     private func handleRuleUpdate(_ rule: FirestoreVacationRule?) {
         firebaseRule = rule
 
         if let r = rule {
-            isVacationPublished = r.published
             currentVacationMode = VacationMode(rawValue: r.type) ?? .monthly
-        } else {
-            isVacationPublished = false
         }
 
-        lastSyncTime = Date()
         SyncStatusManager.shared.setSyncSuccess()
+        print("📊 Boss 數據同步完成: \(currentDisplayMonth)")
     }
 
     private func removeFirebaseListener() {
-        currentListener?.cancel()
-        currentListener = nil
-        print("🔇 Boss 移除監聽")
+        activeListener?.cancel()
+        activeListener = nil
     }
 
-    // MARK: - 🚀 排休發佈
-
+    // MARK: - 🔥 簡化的排休發佈
     func publishVacationSetting(_ setting: VacationSetting) {
         guard !isFirebaseLoading else {
             showToast("請等待當前操作完成", type: .warning)
@@ -195,11 +162,6 @@ class BossCalendarViewModel: ObservableObject {
         }
 
         print("🚀 Boss 發佈排休設定...")
-        print("   組織: \(currentOrgId)")
-        print("   月份: \(currentDisplayMonth)")
-        print("   類型: \(setting.type.rawValue)")
-        print("   天數: \(setting.allowedDays)")
-
         isFirebaseLoading = true
         SyncStatusManager.shared.setSyncing()
 
@@ -219,7 +181,7 @@ class BossCalendarViewModel: ObservableObject {
                 switch completion {
                 case .failure(let error):
                     print("❌ Boss 發佈失敗: \(error)")
-                    self?.handleError(error, context: "Publish Vacation")
+                    self?.showToast("發佈失敗，請重試", type: .error)
                     SyncStatusManager.shared.setSyncError()
                 case .finished:
                     break
@@ -244,8 +206,7 @@ class BossCalendarViewModel: ObservableObject {
         .store(in: &cancellables)
     }
 
-    // MARK: - 🗑️ 取消發佈
-
+    // MARK: - 🔥 簡化的取消發佈
     func unpublishVacation() {
         guard !isFirebaseLoading else {
             showToast("請等待當前操作完成", type: .warning)
@@ -253,7 +214,6 @@ class BossCalendarViewModel: ObservableObject {
         }
 
         print("🗑️ Boss 取消發佈排休...")
-
         isFirebaseLoading = true
         SyncStatusManager.shared.setSyncing()
 
@@ -266,7 +226,7 @@ class BossCalendarViewModel: ObservableObject {
                     switch completion {
                     case .failure(let error):
                         print("❌ Boss 取消發佈失敗: \(error)")
-                        self?.handleError(error, context: "Unpublish Vacation")
+                        self?.showToast("取消發佈失敗，請重試", type: .error)
                         SyncStatusManager.shared.setSyncError()
                     case .finished:
                         break
@@ -287,16 +247,14 @@ class BossCalendarViewModel: ObservableObject {
                         ]
                     )
 
-                    // 更新本地狀態
-                    self?.isVacationPublished = false
+                    // 清除本地狀態
                     self?.firebaseRule = nil
                 }
             )
             .store(in: &cancellables)
     }
 
-    // MARK: - 📋 班表管理
-
+    // MARK: - 班表管理（簡化版）
     func publishSchedule(_ scheduleData: ScheduleData) {
         guard !isFirebaseLoading else {
             showToast("請等待當前操作完成", type: .warning)
@@ -304,11 +262,10 @@ class BossCalendarViewModel: ObservableObject {
         }
 
         print("📋 Boss 發佈班表: \(scheduleData.mode.displayName)")
-
         isFirebaseLoading = true
         SyncStatusManager.shared.setSyncing()
 
-        // 簡單的班表發佈模擬
+        // 🔥 簡化的班表發佈模擬
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             self.isFirebaseLoading = false
             self.isSchedulePublished = true
@@ -324,7 +281,6 @@ class BossCalendarViewModel: ObservableObject {
         }
 
         print("📋 Boss 取消發佈班表")
-
         isFirebaseLoading = true
         SyncStatusManager.shared.setSyncing()
 
@@ -336,8 +292,7 @@ class BossCalendarViewModel: ObservableObject {
         }
     }
 
-    // MARK: - 👑 Boss Actions
-
+    // MARK: - Boss Actions
     func handleBossAction(_ action: BossAction) {
         print("👑 Boss 執行動作: \(action.displayName)")
 
@@ -351,32 +306,7 @@ class BossCalendarViewModel: ObservableObject {
         }
     }
 
-    // MARK: - 📊 狀態屬性
-
-    var vacationStatusText: String {
-        return realVacationStatus
-    }
-
-    var vacationStatusColor: Color {
-        return realVacationStatusColor
-    }
-
-    var scheduleStatusText: String {
-        if isFirebaseLoading {
-            return "處理中..."
-        }
-        return isSchedulePublished ? "已發佈" : "未發佈"
-    }
-
-    var scheduleStatusColor: Color {
-        if isFirebaseLoading {
-            return .blue
-        }
-        return isSchedulePublished ? .green : .orange
-    }
-
-    // MARK: - 🔧 輔助方法
-
+    // MARK: - 輔助方法
     func getVacationLimits() -> (monthly: Int, weekly: Int) {
         if let rule = firebaseRule {
             return (rule.monthlyLimit ?? 8, rule.weeklyLimit ?? 2)
@@ -396,8 +326,7 @@ class BossCalendarViewModel: ObservableObject {
         return .monthly
     }
 
-    // MARK: - 🎯 Toast 管理
-
+    // MARK: - Toast 管理
     func showToast(_ msg: String, type: ToastType) {
         toastMessage = msg
         toastType = type
@@ -407,22 +336,5 @@ class BossCalendarViewModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             withAnimation { self.isToastShowing = false }
         }
-    }
-
-    // MARK: - 🚨 錯誤處理
-
-    private func handleError(_ error: Error, context: String) {
-        let shiftProError: ShiftProError
-
-        if let spError = error as? ShiftProError {
-            shiftProError = spError
-        } else {
-            shiftProError = ShiftProError.unknown("\(context): \(error.localizedDescription)")
-        }
-
-        lastError = shiftProError
-        showToast(shiftProError.errorDescription ?? "發生錯誤", type: .error)
-
-        print("❌ BossCalendarViewModel Error [\(context)]: \(shiftProError.errorDescription ?? "Unknown")")
     }
 }

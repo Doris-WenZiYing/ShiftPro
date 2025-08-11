@@ -136,7 +136,6 @@ struct BossCalendarView: View {
 
     // 處理可見月份變化
     private func handleVisibleMonthChange(month: CalendarMonth) {
-        let monthKey = String(format: "%04d-%02d", month.year, month.month)
 
         guard isValidMonth(month: month) else { return }
 

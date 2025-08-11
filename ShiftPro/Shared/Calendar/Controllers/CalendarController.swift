@@ -14,16 +14,19 @@ public enum CalendarOrientation {
 }
 
 public class CalendarController: ObservableObject {
+    // MARK: - Published Properties （保持與原有系統兼容）
     @Published public var yearMonth: CalendarMonth
     @Published public var selectedDate: CalendarDate?
-    @Published internal var position: Int = CalendarConstants.centerPage
+    @Published internal var position: Int = CalendarConstants.centerPage // 🔥 保留，InfiniteScrollView 需要
 
+    // MARK: - Internal Properties
     public let orientation: CalendarOrientation
     internal let scrollDetector: CurrentValueSubject<CGFloat, Never>
     internal var cancellables = Set<AnyCancellable>()
 
-    private var isUserInitiated = false
-    private var lastLoggedMonth: CalendarMonth?
+    // MARK: - 🔥 移除的防抖屬性（這些導致了問題）
+    // 移除: isUserInitiated, lastLoggedMonth, isProcessingAuthChange
+    // 移除: hasSetupAuthListener, lastStatusUpdate 等複雜防抖邏輯
 
     public init(orientation: CalendarOrientation = .vertical, month: CalendarMonth = .current) {
         let detector = CurrentValueSubject<CGFloat, Never>(0)
@@ -32,99 +35,50 @@ public class CalendarController: ObservableObject {
         self.scrollDetector = detector
         self.yearMonth = month
         self.selectedDate = CalendarDate.today
-        self.lastLoggedMonth = month
 
-        // 🔥 修復：更穩定的滾動檢測
+        print("📅 CalendarController 初始化: \(formatMonth(month))")
+
+        // 🔥 簡化但保留基本滾動檢測（參考 SwiftUICalendar 模式）
         detector
             .dropFirst()
             .sink { [weak self] value in
                 self?.handleScrollChange(value)
             }
             .store(in: &cancellables)
-
-        print("📅 CalendarController 初始化: \(formatMonth(month))")
     }
 
-    // 🔥 修復：穩定的滾動變化處理
+    // MARK: - 🔥 簡化的滾動處理（保留核心邏輯，移除防抖）
     private func handleScrollChange(_ value: CGFloat) {
         let move = position - CalendarConstants.centerPage
         let newMonth = yearMonth.addMonths(move)
 
-        // 只在真正變化時更新
+        // 🔥 關鍵修復：只做必要的更新，移除複雜的防抖和狀態檢查
         if newMonth != yearMonth && abs(move) <= 1 {
             yearMonth = newMonth
             position = CalendarConstants.centerPage
-
-            if shouldLogMonthChange(newMonth) {
-                print("📅 Calendar 月份變化: \(formatMonth(newMonth))")
-                lastLoggedMonth = newMonth
-            }
+            print("📅 Calendar 月份變化: \(formatMonth(newMonth))")
         }
     }
 
-    // 🔥 修復：控制是否應該記錄月份變化
-    private func shouldLogMonthChange(_ month: CalendarMonth) -> Bool {
-        // 如果是用戶主動操作，總是記錄
-        if isUserInitiated {
-            isUserInitiated = false
-            return true
-        }
+    // MARK: - 🔥 簡化的公開方法（保持 API 兼容性）
+    public func setYearMonth(_ month: CalendarMonth) {
+        guard month != yearMonth else { return }
 
-        // 如果與上次記錄的月份不同，且時間間隔合理，才記錄
-        guard let lastMonth = lastLoggedMonth else { return true }
-
-        let monthDiff = abs((month.year * 12 + month.month) - (lastMonth.year * 12 + lastMonth.month))
-        return monthDiff >= 1
+        // 🔥 直接更新，移除所有防抖檢查和用戶意圖追蹤
+        yearMonth = month
+        position = CalendarConstants.centerPage
+        print("📅 Calendar 手動設定月份: \(formatMonth(month))")
     }
 
-    private func formatMonth(_ month: CalendarMonth) -> String {
-        return "\(month.year)年\(String(format: "%02d", month.month))月"
-    }
-
-    // 🔥 修復：安全的月份設定
     public func setYearMonth(year: Int, month: Int) {
         setYearMonth(CalendarMonth(year: year, month: month))
     }
 
-    public func setYearMonth(_ month: CalendarMonth) {
-            guard month != yearMonth else { return }
-
-            isUserInitiated = true
-            yearMonth = month
-            position = CalendarConstants.centerPage
-
-            print("📅 Calendar 用戶設定月份: \(formatMonth(month))")
-        }
-
-    public func selectDate(_ date: CalendarDate) {
-        selectedDate = date
-    }
-
-    public func isDateSelected(_ date: CalendarDate) -> Bool {
-        guard let selected = selectedDate else { return false }
-        return selected == date
-    }
-
-    // 🔥 新增：靜默導航（不產生日誌，不觸發更新檢查）
-    func silentNavigateToMonth(year: Int, month: Int) {
-        let targetMonth = CalendarMonth(year: year, month: month)
-
-        guard targetMonth != yearMonth else { return }
-
-        // 直接更新，不觸發用戶操作標記
-        yearMonth = targetMonth
-        position = CalendarConstants.centerPage
-
-        // 不設置 isUserInitiated，避免產生日誌
-        objectWillChange.send()
-    }
-
-    // 🔥 修復：安全的月份導航
+    // MARK: - 導航方法（簡化版）
     public func navigateToMonth(year: Int, month: Int) {
         setYearMonth(year: year, month: month)
     }
 
-    // 🔥 新增：月份導航方法
     public func navigateToNextMonth() {
         let nextMonth = yearMonth.addMonths(1)
         setYearMonth(nextMonth)
@@ -135,33 +89,29 @@ public class CalendarController: ObservableObject {
         setYearMonth(previousMonth)
     }
 
-
-    // 🔥 新增：強制重置狀態（如果遇到異常）
-    public func resetState() {
-        position = CalendarConstants.centerPage
-        objectWillChange.send()
-        print("🔄 Calendar 狀態已重置")
+    // MARK: - 日期選擇方法
+    public func selectDate(_ date: CalendarDate) {
+        selectedDate = date
     }
-}
 
-// 🔥 新增：CalendarController 的安全擴展
-extension CalendarController {
-    // 檢查月份是否在合理範圍內
+    public func isDateSelected(_ date: CalendarDate) -> Bool {
+        guard let selected = selectedDate else { return false }
+        return selected == date
+    }
+
+    // MARK: - 🔥 為了兼容性保留的內部屬性
+    var internalYearMonth: CalendarMonth {
+        return yearMonth
+    }
+
+    // MARK: - 基本輔助方法
+    private func formatMonth(_ month: CalendarMonth) -> String {
+        return "\(month.year)年\(String(format: "%02d", month.month))月"
+    }
+
+    // MARK: - 🔥 保留基本驗證，移除過度的安全檢查
     func isValidMonth(_ month: CalendarMonth) -> Bool {
         let currentYear = Calendar.current.component(.year, from: Date())
         return month.year >= currentYear - 2 && month.year <= currentYear + 5
-    }
-
-    // 安全的月份切換，帶驗證
-    func safeNavigateToMonth(year: Int, month: Int) -> Bool {
-        let targetMonth = CalendarMonth(year: year, month: month)
-
-        guard isValidMonth(targetMonth) else {
-            print("⚠️ 無效的月份: \(year)-\(month)")
-            return false
-        }
-
-        setYearMonth(targetMonth)
-        return true
     }
 }
